@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Local state
+backend/data/
+data/
+.env
+*.db
+*.db-wal
+*.db-shm
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

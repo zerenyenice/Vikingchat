@@ -1,0 +1,49 @@
+services:
+  openviking:
+    build:
+      context: ./docker/openviking
+    image: vikingchat/openviking:local
+    env_file: .env
+    environment:
+      OV_SERVER_HOST: 0.0.0.0
+      OV_SERVER_PORT: "1933"
+    ports:
+      - "${OPENVIKING_PORT:-1933}:1933"
+    volumes:
+      - openviking-data:/data
+      - openviking-config:/config
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    image: vikingchat/backend:local
+    env_file: .env
+    environment:
+      OPENVIKING_URL: http://openviking:1933
+      OPENVIKING_API_KEY: ${OPENVIKING_ROOT_API_KEY:-}
+      DATA_DIR: /data
+      CORS_ORIGINS: '["http://localhost:${UI_PORT:-8080}","http://localhost:5173"]'
+    depends_on:
+      openviking:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - backend-data:/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    image: vikingchat/frontend:local
+    depends_on:
+      - backend
+    ports:
+      - "${UI_PORT:-8080}:80"
+    restart: unless-stopped
+
+volumes:
+  openviking-data:
+  openviking-config:
+  backend-data:
