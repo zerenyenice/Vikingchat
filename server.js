@@ -13,6 +13,7 @@
 //   OPENVIKING_URL                          default http://127.0.0.1:1933
 //   OPENVIKING_API_KEY                      OpenViking API key (root key)
 //   OPENVIKING_USER                         user namespace (default "default")
+//   AGENT_URL                               deep agent service (default http://127.0.0.1:8100)
 //   DATA_DIR                                where chats are stored (default ./data)
 //   HOST / PORT                             listen address (default 0.0.0.0:3000)
 
@@ -43,7 +44,8 @@ const OV_USER = env.OPENVIKING_USER || "default";
 const OV_ENABLED = Boolean(OV_URL) && env.OPENVIKING_DISABLED !== "1";
 const UPLOADS_URI = "viking://resources/uploads";
 const MEMORIES_URI = `viking://user/${OV_USER}/memories`;
-const EXTRACT_DELAY_MS = Number(env.OPENVIKING_EXTRACT_DELAY_MS || 90_000);
+const AGENT_URL = (env.AGENT_URL ?? "http://127.0.0.1:8100").replace(/\/+$/, "");
+const AGENT_ENABLED = Boolean(AGENT_URL) && env.AGENT_DISABLED !== "1";
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const SYSTEM_PROMPT =
@@ -207,18 +209,37 @@ async function syncMessages(chatId, messages) {
   });
 }
 
-// Memory extraction is expensive (a model call), so run it once the chat has
-// been quiet for a while instead of after every message.
-const extractTimers = new Map();
-function scheduleExtract(chatId) {
-  clearTimeout(extractTimers.get(chatId));
-  extractTimers.set(chatId, setTimeout(async () => {
-    extractTimers.delete(chatId);
-    try {
-      await ov(`/api/v1/sessions/${encodeURIComponent(chatId)}/extract`, { method: "POST", body: {}, timeout: 120_000 });
-      log(`[memory] extracted from chat ${chatId}`);
-    } catch (err) { log(`[memory] extract failed for ${chatId}: ${err.message}`); }
-  }, EXTRACT_DELAY_MS));
+// Deep agent service (agent/server.py): owns memory and document lookup.
+let agentReadyCache = { at: 0, value: null };
+async function agentHealth() {
+  if (!AGENT_ENABLED) return { enabled: false, ready: false };
+  // Cache a ready answer for a few seconds; re-check quickly while it is starting.
+  const ttl = agentReadyCache.value?.ready ? 5_000 : 1_000;
+  if (Date.now() - agentReadyCache.at < ttl && agentReadyCache.value) return agentReadyCache.value;
+  let value;
+  try {
+    const r = await fetch(`${AGENT_URL}/health`, { signal: AbortSignal.timeout(3_000) });
+    const h = await r.json();
+    value = { enabled: true, ready: Boolean(h.ready), model: h.model, openviking: h.openviking, error: h.error ?? null };
+  } catch (err) { value = { enabled: true, ready: false, error: err.name === "TimeoutError" ? "timed out" : "unreachable" }; }
+  agentReadyCache = { at: Date.now(), value };
+  return value;
+}
+
+async function runAgent(chat) {
+  let r;
+  try {
+    r = await fetch(`${AGENT_URL}/chat`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chat.id, messages: chat.messages.slice(-40).map(({ role, content }) => ({ role, content })) }),
+      signal: AbortSignal.timeout(240_000),
+    });
+  } catch (err) {
+    throw new HttpError(503, err.name === "TimeoutError" ? "The agent took too long to answer." : `Agent unreachable: ${err.message}`);
+  }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new HttpError(r.status === 400 ? 400 : 502, data.error || `Agent error (${r.status})`);
+  return data;
 }
 
 async function readContent(uri, maxChars) {
@@ -313,20 +334,32 @@ async function handleTurn(req, res, chatId) {
   chat.messages.push(userMsg);
   if (chat.messages.length === 1) chat.title = clip(text.replace(/\s+/g, " "), 48);
 
-  const ctx = await gatherContext(text);
-  const history = chat.messages.slice(-40);
-  const { reply, usage } = await askModel(buildSystemPrompt(ctx), history);
-  const sources = ctx.resources.map((r) => ({ name: r.name, uri: r.uri }));
-  const assistantMsg = { role: "assistant", content: reply || "(empty reply)", ts: Date.now(), sources };
+  let assistantMsg, usage = null, usedMemories = 0, via = "agent";
+  const agent = AGENT_ENABLED ? await agentHealth() : { ready: false };
+  if (agent.ready) {
+    try {
+      const out = await runAgent(chat);
+      assistantMsg = { role: "assistant", content: out.reply || "(empty reply)", ts: Date.now(), sources: out.sources ?? [],
+        memoryUpdated: Boolean(out.memory_updated), toolCalls: (out.tool_calls ?? []).map((t) => t.name) };
+    } catch (err) {
+      if (err.status === 400) { chat.messages.pop(); throw err; }
+      log(`[agent] failed, falling back to direct model call: ${err.message}`);
+    }
+  }
+  if (!assistantMsg) {
+    // Fallback: plain model call with retrieved context (no agentic memory writes).
+    via = "direct";
+    const ctx = await gatherContext(text);
+    const out = await askModel(buildSystemPrompt(ctx), chat.messages.slice(-40));
+    usage = out.usage; usedMemories = ctx.memories.length;
+    assistantMsg = { role: "assistant", content: out.reply || "(empty reply)", ts: Date.now(), sources: ctx.resources.map((r) => ({ name: r.name, uri: r.uri })) };
+  }
   chat.messages.push(assistantMsg);
   await saveChat(chat);
 
-  if (OV_ENABLED) {
-    syncMessages(chat.id, [userMsg, assistantMsg])
-      .then(() => scheduleExtract(chat.id))
-      .catch((err) => log(`[session] sync failed for ${chat.id}: ${err.message}`));
-  }
-  sendJson(res, 200, { chat: { id: chat.id, title: chat.title, updatedAt: chat.updatedAt }, message: assistantMsg, usage, usedMemories: ctx.memories.length });
+  // Mirror the conversation into the OpenViking session (history + session-aware search).
+  if (OV_ENABLED) syncMessages(chat.id, [userMsg, assistantMsg]).catch((err) => log(`[session] sync failed for ${chat.id}: ${err.message}`));
+  sendJson(res, 200, { chat: { id: chat.id, title: chat.title, updatedAt: chat.updatedAt }, message: assistantMsg, usage, usedMemories, via });
 }
 
 async function handleUpload(req, res) {
@@ -398,10 +431,11 @@ async function route(req, res) {
   let match;
 
   if (p === "/api/health") {
-    const ready = await ovReady();
+    const [ready, agent] = await Promise.all([ovReady(), agentHealth()]);
     return sendJson(res, 200, {
       ok: true, configured: Boolean(ENDPOINT && API_KEY), deployment: DEPLOYMENT, apiVersion: API_VERSION || "v1",
       openviking: { enabled: OV_ENABLED, ready: ready.ready, detail: ready.detail, user: OV_USER },
+      agent,
     });
   }
   if (p === "/api/chats" && m === "GET") return sendJson(res, 200, { chats: await listChats() });
@@ -459,4 +493,6 @@ server.listen(PORT, HOST, async () => {
   log(`Chats stored in ${CHATS_DIR}`);
   if (OV_ENABLED) { const r = await ovReady(); log(`OpenViking: ${OV_URL} (${r.detail}${OV_KEY ? ", key set" : ", NO key"})`); }
   else log("OpenViking: disabled (no memory or documents)");
+  if (AGENT_ENABLED) { const a = await agentHealth(); log(`Agent service: ${AGENT_URL} (${a.ready ? "ready" : a.error || "starting"})`); }
+  else log("Agent service: disabled (direct model calls only)");
 });

@@ -5,7 +5,7 @@ services:
   - type: web
     name: vikingchat
     runtime: docker
-    plan: starter            # disks need a paid plan; free has no persistence
+    plan: standard           # 2 GB RAM: OpenViking + the Python agent + Node do not fit in 512 MB
     branch: claude/mobile-ui-testing-setup-tv9utr
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health

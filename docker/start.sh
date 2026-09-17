@@ -85,6 +85,13 @@ JSON
   fi
 fi
 
+if [ "${AGENT_DISABLED:-0}" != "1" ]; then
+  echo "[start] launching agent service on 127.0.0.1:${AGENT_PORT:-8100}"
+  AGENT_HOST=127.0.0.1 AGENT_PORT="${AGENT_PORT:-8100}" /app/agent-venv/bin/python /app/vikingchat/agent/server.py &
+  AGENT_PID=$!
+  trap 'kill -TERM $AGENT_PID ${OV_PID:-} 2>/dev/null || true' TERM INT EXIT
+fi
+
 echo "[start] launching Vikingchat on :${PORT:-3000}"
 cd /app/vikingchat
 exec node server.js

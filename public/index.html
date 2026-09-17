@@ -74,6 +74,7 @@
   .meta { font-size: 11px; color: var(--muted); padding: 0 6px; font-variant-numeric: tabular-nums; }
   .sources { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 4px; }
   .sources span { font-size: 11px; color: var(--sea); border: 1px solid color-mix(in srgb, var(--sea) 40%, transparent); border-radius: 999px; padding: 1px 8px; }
+  .sources span.mem { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
   .typing { display: inline-flex; gap: 4px; align-items: center; height: 1.5em; }
   .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite; }
   .typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
@@ -232,7 +233,8 @@
       const h = await api("/api/health");
       ovReady = Boolean(h.openviking?.ready);
       if (h.configured) {
-        setStatus("live", `${h.deployment}${ovReady ? " · memory on" : " · memory off"}`);
+        const agentOn = Boolean(h.agent?.ready);
+        setStatus("live", `${h.deployment}${agentOn ? " · agent" : ""}${ovReady ? " · memory on" : " · memory off"}`);
         showBanner(ovReady ? "" : h.openviking?.enabled
           ? "Memory and documents are unavailable right now: the OpenViking service is starting or unreachable. Chat still works."
           : "Memory and documents are off: OpenViking is not configured on the server.");
@@ -258,9 +260,10 @@
     el.className = `msg ${m.role}${m.error ? " error" : ""}`;
     const b = document.createElement("div"); b.className = "bubble"; b.textContent = m.content;
     el.append(b);
-    if (m.sources?.length) {
+    if (m.sources?.length || m.memoryUpdated) {
       const s = document.createElement("div"); s.className = "sources";
-      for (const src of m.sources) { const t = document.createElement("span"); t.textContent = src.name; s.append(t); }
+      if (m.memoryUpdated) { const t = document.createElement("span"); t.className = "mem"; t.textContent = "Memory updated"; s.append(t); }
+      for (const src of m.sources || []) { const t = document.createElement("span"); t.textContent = src.name; s.append(t); }
       el.append(s);
     }
     const meta = document.createElement("div"); meta.className = "meta";
@@ -433,7 +436,7 @@
   // ---- memory -------------------------------------------------------------
   async function refreshMemory() {
     const panel = $("panel-memory"); panel.replaceChildren();
-    const hint = document.createElement("div"); hint.className = "hint"; hint.textContent = "What Vikingchat has learned about you from past chats. Memories are extracted shortly after a conversation goes quiet.";
+    const hint = document.createElement("div"); hint.className = "hint"; hint.textContent = "What Vikingchat has learned about you. The agent decides itself what to remember and writes these files during the conversation.";
     panel.append(hint);
     if (mode === "preview" || !ovReady) { const e = document.createElement("div"); e.className = "empty"; e.textContent = mode === "preview" ? "Connect a server to see memories." : "OpenViking is not reachable right now."; panel.append(e); return; }
     let mem;
