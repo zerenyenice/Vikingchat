@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vikingchat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+  :root {
+    --bg: #F3EFE6;          /* birch bark */
+    --surface: #FFFFFF;
+    --surface-2: #E9E3D6;
+    --ink: #1B2430;
+    --muted: #66707F;
+    --line: #D9D2C3;
+    --accent: #B4502E;      /* forge ember */
+    --accent-ink: #FFF7F2;
+    --sea: #2B6777;         /* fjord */
+    --ok: #2F7D4F;
+    --warn: #A9741A;
+    --bad: #A63A2B;
+    --shadow: 0 1px 2px rgba(27,36,48,.08), 0 6px 20px -12px rgba(27,36,48,.25);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0F1720; --surface: #182330; --surface-2: #1F2C3B; --ink: #E8E4DA; --muted: #8B96A5;
+      --line: #2A3847; --accent: #E0704A; --accent-ink: #1B120E; --sea: #6FB3C4;
+      --ok: #6BC28C; --warn: #E0B25A; --bad: #E67F70;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px -12px rgba(0,0,0,.6);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0F1720; --surface: #182330; --surface-2: #1F2C3B; --ink: #E8E4DA; --muted: #8B96A5;
+    --line: #2A3847; --accent: #E0704A; --accent-ink: #1B120E; --sea: #6FB3C4;
+    --ok: #6BC28C; --warn: #E0B25A; --bad: #E67F70;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px -12px rgba(0,0,0,.6);
+    color-scheme: dark;
+  }
+
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.5 "Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  * { box-sizing: border-box; }
+  button, textarea { font: inherit; color: inherit; }
+
+  .app {
+    height: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+  }
+
+  /* Header */
+  .top {
+    position: sticky; top: env(safe-area-inset-top, 0px);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 12px 16px;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+    z-index: 2;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .brand svg { width: 30px; height: 30px; flex: none; }
+  .brand h1 {
+    margin: 0; font-family: "Fraunces", Georgia, serif; font-weight: 700;
+    font-size: 22px; letter-spacing: -0.01em; line-height: 1;
+  }
+  .status {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; letter-spacing: .02em; color: var(--muted);
+    padding: 4px 10px; border-radius: 999px; background: var(--surface-2);
+    white-space: nowrap; max-width: 55%; overflow: hidden; text-overflow: ellipsis;
+  }
+  .status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .status[data-state="live"] .dot { background: var(--ok); }
+  .status[data-state="preview"] .dot { background: var(--warn); }
+  .status[data-state="error"] .dot { background: var(--bad); }
+
+  /* Messages */
+  .log {
+    flex: 1; overflow-y: auto; overscroll-behavior: contain;
+    padding: 16px 16px 8px;
+    display: flex; flex-direction: column; gap: 10px;
+    scroll-behavior: smooth;
+  }
+  .msg { display: flex; flex-direction: column; max-width: 86%; gap: 4px; }
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.assistant { align-self: flex-start; align-items: flex-start; }
+  .bubble {
+    padding: 10px 14px; border-radius: 18px;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    box-shadow: var(--shadow);
+  }
+  .user .bubble { background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 6px; }
+  .assistant .bubble { background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
+  .msg.error .bubble { border-color: var(--bad); color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, var(--surface)); }
+  .meta { font-size: 11px; color: var(--muted); padding: 0 6px; font-variant-numeric: tabular-nums; }
+
+  .typing { display: inline-flex; gap: 4px; align-items: center; height: 1.5em; }
+  .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite; }
+  .typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .25 } 40% { opacity: 1 } }
+
+  .banner {
+    margin: 0 16px 8px; padding: 10px 12px; border-radius: 10px; font-size: 13px;
+    background: var(--surface-2); color: var(--ink); border-left: 3px solid var(--warn);
+  }
+  .banner[data-kind="error"] { border-left-color: var(--bad); }
+
+  /* Suggestions */
+  .chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 16px 8px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip {
+    flex: none; border: 1px solid var(--line); background: var(--surface); border-radius: 999px;
+    padding: 8px 14px; font-size: 14px; cursor: pointer;
+  }
+  .chip:active { background: var(--surface-2); }
+
+  /* Composer */
+  .composer {
+    display: flex; align-items: flex-end; gap: 8px;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--line);
+    background: var(--bg);
+  }
+  .composer textarea {
+    flex: 1; resize: none; min-height: 44px; max-height: 160px;
+    padding: 10px 14px; border-radius: 22px; border: 1px solid var(--line);
+    background: var(--surface); line-height: 1.4; outline: none;
+  }
+  .composer textarea:focus { border-color: var(--sea); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sea) 25%, transparent); }
+  .send {
+    flex: none; width: 44px; height: 44px; border-radius: 50%; border: 0;
+    background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; cursor: pointer;
+  }
+  .send:disabled { opacity: .45; cursor: default; }
+  .send svg { width: 20px; height: 20px; }
+  .ghost {
+    flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line);
+    background: var(--surface); color: var(--muted); display: grid; place-items: center; cursor: pointer;
+  }
+  .ghost svg { width: 18px; height: 18px; }
+  :is(button, textarea, .chip):focus-visible { outline: 2px solid var(--sea); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .log { scroll-behavior: auto; } .typing i { animation: none; opacity: .6; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M4 20c3 4 7 6 12 6s9-2 12-6" fill="none" stroke="var(--sea)" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M8 20V10l8-6 8 6v10" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/>
+        <path d="M16 4v16" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+      <h1>Vikingchat</h1>
+    </div>
+    <div class="status" id="status" data-state="checking"><span class="dot"></span><span id="statusText">Connecting…</span></div>
+  </header>
+
+  <main class="log" id="log" aria-live="polite" aria-label="Conversation"></main>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <nav class="chips" id="chips" aria-label="Suggested prompts">
+    <button class="chip" type="button" data-prompt="Tell me a short Viking saga in three sentences.">Short saga</button>
+    <button class="chip" type="button" data-prompt="Explain how longships were built.">Longships</button>
+    <button class="chip" type="button" data-prompt="Give me three Old Norse words and what they mean.">Old Norse words</button>
+    <button class="chip" type="button" data-prompt="What did Vikings eat on a voyage?">Voyage food</button>
+  </nav>
+
+  <form class="composer" id="composer">
+    <button class="ghost" type="button" id="clear" title="New conversation" aria-label="New conversation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+    </button>
+    <textarea id="input" rows="1" placeholder="Message Vikingchat…" autocomplete="off" enterkeyhint="send" aria-label="Message"></textarea>
+    <button class="send" type="submit" id="send" aria-label="Send" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+    </button>
+  </form>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const log = $("log"), input = $("input"), send = $("send"), form = $("composer"),
+        status = $("status"), statusText = $("statusText"), banner = $("banner"), chips = $("chips");
+
+  const STORE_KEY = "vikingchat.messages.v1";
+  let mode = "checking";          // live | preview | error
+  let busy = false;
+  let messages = load();
+
+  function load() {
+    try { const raw = localStorage.getItem(STORE_KEY); if (raw) return JSON.parse(raw); } catch {}
+    return [];
+  }
+  function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(messages.slice(-60))); } catch {} }
+
+  function setStatus(state, text) {
+    mode = state; status.dataset.state = state; statusText.textContent = text;
+  }
+  function showBanner(text, kind) {
+    banner.textContent = text; banner.dataset.kind = kind || "info"; banner.hidden = !text;
+  }
+
+  function timeLabel(ts) {
+    return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  function renderMessage(m) {
+    const el = document.createElement("div");
+    el.className = `msg ${m.role}${m.error ? " error" : ""}`;
+    const b = document.createElement("div"); b.className = "bubble"; b.textContent = m.content;
+    const meta = document.createElement("div"); meta.className = "meta";
+    meta.textContent = (m.role === "user" ? "You" : "Vikingchat") + " · " + timeLabel(m.ts || Date.now());
+    el.append(b, meta);
+    return el;
+  }
+  function renderAll() {
+    log.replaceChildren();
+    if (messages.length === 0) {
+      log.append(renderMessage({ role: "assistant", ts: Date.now(),
+        content: "Heil og sæl! I’m Vikingchat. Ask me anything, or tap a suggestion below." }));
+    }
+    for (const m of messages) log.append(renderMessage(m));
+    scrollToEnd();
+  }
+  function scrollToEnd() { log.scrollTop = log.scrollHeight; }
+
+  function showTyping() {
+    const el = document.createElement("div"); el.className = "msg assistant"; el.id = "typing";
+    const b = document.createElement("div"); b.className = "bubble";
+    b.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+    el.append(b); log.append(el); scrollToEnd();
+  }
+  function hideTyping() { document.getElementById("typing")?.remove(); }
+
+  async function checkHealth() {
+    try {
+      const r = await fetch("/api/health", { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const h = await r.json();
+      if (h.configured) {
+        setStatus("live", `Live · ${h.deployment}`); showBanner("");
+      } else {
+        setStatus("error", "Not configured");
+        showBanner("The server is running but has no Azure OpenAI endpoint or api key set. Add them to the environment and restart.", "error");
+      }
+    } catch {
+      setStatus("preview", "Preview mode");
+      showBanner("Preview mode: this page is not connected to a server, so replies are simulated. Layout, colors and controls are the real thing.");
+    }
+  }
+
+  async function askBackend(history) {
+    const r = await fetch("/api/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: history.map(({ role, content }) => ({ role, content })) }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    return data.reply || "(empty reply)";
+  }
+  function simulateReply(text) {
+    const canned = [
+      "This is a simulated reply so you can check the layout on your phone. On the real server, this answer comes from Azure OpenAI.",
+      "Skál! In preview mode I only echo. You asked: “" + text.slice(0, 120) + (text.length > 120 ? "…" : "") + "”",
+      "Longer replies wrap like this so you can see how multi-line bubbles behave on a narrow screen.\n\nA second paragraph keeps its spacing, and very long words such as Hávamálstrophenverzeichnis break instead of overflowing.",
+    ];
+    const pick = canned[(text.length + messages.length) % canned.length];
+    return new Promise((res) => setTimeout(() => res(pick), 700 + Math.random() * 600));
+  }
+
+  async function submit(text) {
+    text = text.trim();
+    if (!text || busy) return;
+    busy = true; send.disabled = true; chips.hidden = true;
+    const userMsg = { role: "user", content: text, ts: Date.now() };
+    messages.push(userMsg); save();
+    if (messages.length === 1) log.replaceChildren();
+    log.append(renderMessage(userMsg));
+    input.value = ""; autosize();
+    showTyping();
+    try {
+      const reply = mode === "live" ? await askBackend(messages) : await simulateReply(text);
+      hideTyping();
+      const a = { role: "assistant", content: reply, ts: Date.now() };
+      messages.push(a); save(); log.append(renderMessage(a));
+    } catch (err) {
+      hideTyping();
+      log.append(renderMessage({ role: "assistant", error: true, ts: Date.now(),
+        content: "Couldn’t get a reply: " + err.message }));
+    } finally {
+      busy = false; send.disabled = !input.value.trim(); scrollToEnd(); input.focus();
+    }
+  }
+
+  function autosize() {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 160) + "px";
+  }
+  input.addEventListener("input", () => { autosize(); send.disabled = !input.value.trim() || busy; });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(input.value); }
+  });
+  form.addEventListener("submit", (e) => { e.preventDefault(); submit(input.value); });
+  chips.addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip"); if (chip) submit(chip.dataset.prompt);
+  });
+  $("clear").addEventListener("click", () => {
+    messages = []; save(); chips.hidden = false; renderAll(); input.focus();
+  });
+
+  chips.hidden = messages.length > 0;
+  renderAll();
+  checkHealth();
+})();
+</script>
+</body>
+</html>
