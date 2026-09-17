@@ -1,89 +1,101 @@
 # Vikingchat
 
-A mobile-first chat UI with a tiny Node server that proxies to **Azure OpenAI**.
-No dependencies: Node 18+ is all you need.
+A mobile-first chat app on **Azure OpenAI** with **OpenViking** as its context
+database: chat history you can return to, long-term memory about you, and a
+place to upload documents that the assistant can read.
 
 ```
-public/index.html   the chat UI (works standalone in "preview mode" too)
-server.js           static files + POST /api/chat proxy to Azure OpenAI
+public/index.html   chat UI (drawer with Chats / Documents / Memory)
+server.js           Node server: chat storage, Azure OpenAI, OpenViking client
+docker/start.sh     container entrypoint: writes ov.conf, starts OpenViking + Node
+Dockerfile          OpenViking image + Node, one container
+render.yaml         Render blueprint (Docker service + persistent disk)
 ```
+
+## How it works
+
+- **Chats** are stored as JSON under `DATA_DIR/chats`. The drawer lists them,
+  you can reopen or delete any of them.
+- **Memory**: every chat is mirrored into an OpenViking *session*. About 90
+  seconds after a chat goes quiet, OpenViking extracts memories (profile,
+  preferences, entities, events) into `viking://user/<user>/memories` using
+  the cheap processing model. On every new message the server searches those
+  memories and puts the hits in the system prompt.
+- **Documents**: the paperclip uploads a file to OpenViking
+  (`viking://resources/uploads/<name>`), which parses, summarises and embeds
+  it with the processing and embedding deployments. Relevant passages are
+  retrieved for each message and cited under the reply.
+
+Models used:
+
+| Purpose | Env var | Default |
+| --- | --- | --- |
+| Answering | `AZURE_OPENAI_DEPLOYMENT` | `gpt-5.1` |
+| Memory extraction, document summaries | `AZURE_OPENAI_PROCESSING_DEPLOYMENT` | `gpt-5.4-mini` |
+| Embeddings for search | `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` | `text-embedding-3-large` |
 
 ## Configuration
 
-The server reads these environment variables (see `.env.example`):
-
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `endpoint` or `AZURE_OPENAI_ENDPOINT` | Azure OpenAI resource URL | required |
-| `api key` or `AZURE_OPENAI_API_KEY` | Azure OpenAI key | required |
-| `AZURE_OPENAI_DEPLOYMENT` | deployment name in that resource (`gpt-5.1` or `gpt-5.4-mini`) | `gpt-5.1` |
-| `AZURE_OPENAI_API_VERSION` | optional; set to use the legacy versioned path | unset (v1 API) |
-| `HOST` | listen address | `0.0.0.0` |
-| `PORT` | listen port | `3000` |
+| `AZURE_OPENAI_ENDPOINT` (or `endpoint`) | Azure OpenAI resource URL | required |
+| `AZURE_OPENAI_API_KEY` (or `api key`) | Azure OpenAI key | required |
+| `AZURE_OPENAI_API_VERSION` | optional; use the legacy versioned chat path | unset (v1 API) |
+| `OPENVIKING_URL` | OpenViking server | `http://127.0.0.1:1933` |
+| `OPENVIKING_API_KEY` | OpenViking key | generated in Docker |
+| `OPENVIKING_USER` | user namespace for memories | `default` |
+| `OPENVIKING_DISABLED` | `1` runs without memory/documents | unset |
+| `DATA_DIR` | chat storage | `./data` (`/app/.openviking/vikingchat` in Docker) |
+| `HOST` / `PORT` | listen address | `0.0.0.0` / `3000` |
 
-`0.0.0.0` means "every network interface", so other devices on the same
-Wi-Fi can reach the server.
+There is no login yet: everyone who opens the app shares one memory space, so
+keep the URL private.
 
-## Run it and open it on your phone
+## Deploy on Render (from a phone)
 
-```bash
-export endpoint="https://YOUR-RESOURCE.openai.azure.com/"
-export "api key=YOUR-KEY"                # or AZURE_OPENAI_API_KEY=YOUR-KEY
-export AZURE_OPENAI_DEPLOYMENT=gpt-5.1   # or gpt-5.4-mini
-npm start
-```
+The blueprint deploys one Docker service with a 1 GB persistent disk mounted at
+`/app/.openviking`. The disk is what keeps chats, memories and documents across
+restarts, and disks need a paid instance (Starter is enough to try).
 
-The server prints its LAN address, for example `http://192.168.1.23:3000`.
-Open that on a phone connected to the same Wi-Fi. If it does not load,
-allow the port through your computer's firewall.
+1. Render dashboard → New → **Blueprint** → pick this repo and branch.
+2. Fill in `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY` when prompted.
+3. Apply. The first build pulls the OpenViking image and takes a few minutes.
 
-### Reachable from anywhere (public URL)
+Or as a plain Web Service: runtime Docker, add a disk at `/app/.openviking`,
+set the two Azure variables. The status pill in the app shows
+"memory on" once OpenViking is ready (it can take a minute after each start).
 
-Any HTTP tunnel works; two common ones:
+If the service runs out of memory on Starter (512 MB), move it to Standard.
 
-```bash
-# Cloudflare quick tunnel (no account needed)
-cloudflared tunnel --url http://localhost:3000
-
-# ngrok
-ngrok http 3000
-```
-
-Both print a public `https://` URL you can open on mobile data.
-
-### Deploy from your phone (Render, free tier)
-
-1. Sign in at https://dashboard.render.com with GitHub.
-2. New → Web Service → pick the `Vikingchat` repo and this branch.
-3. Leave the build command empty, start command `npm start`.
-4. Add environment variables `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY`
-   (and `AZURE_OPENAI_DEPLOYMENT` if you want something other than `gpt-5.1`),
-   then Create Web Service.
-
-Render assigns `PORT` automatically and gives you an `https://…onrender.com`
-URL. `render.yaml` in this repo pre-fills the same settings for a Blueprint
-deploy. The free plan sleeps after 15 minutes without traffic, so the first
-request after a pause takes about half a minute.
-
-### Docker
+## Run locally
 
 ```bash
 docker build -t vikingchat .
-docker run --rm -p 3000:3000 \
-  -e endpoint="https://YOUR-RESOURCE.openai.azure.com/" \
-  -e "api key=YOUR-KEY" -e AZURE_OPENAI_DEPLOYMENT=gpt-5.1 vikingchat
+docker run --rm -p 3000:3000 -v vikingchat-data:/app/.openviking \
+  -e AZURE_OPENAI_ENDPOINT="https://YOUR-RESOURCE.openai.azure.com/" \
+  -e AZURE_OPENAI_API_KEY="YOUR-KEY" vikingchat
+```
+
+Without Docker (no memory or documents unless you run OpenViking yourself):
+
+```bash
+export AZURE_OPENAI_ENDPOINT=... AZURE_OPENAI_API_KEY=... OPENVIKING_DISABLED=1
+npm start
 ```
 
 ## API
 
-- `GET /api/health` → `{ ok, configured, deployment, apiVersion }`
-- `POST /api/chat` with `{ "messages": [{ "role": "user", "content": "Hi" }] }`
-  → `{ reply, usage }`. Only `user` and `assistant` roles are forwarded; the
-  system prompt is set server-side (`SYSTEM_PROMPT` env var to override).
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/health` | server, model and OpenViking status |
+| GET/POST | `/api/chats` | list / create chats |
+| GET/DELETE | `/api/chats/:id` | load / delete a chat |
+| POST | `/api/chats/:id/messages` | `{content}` → `{message, chat, usedMemories}` |
+| GET | `/api/memory` | what OpenViking remembers about the user |
+| GET/POST/DELETE | `/api/documents` | list / upload (`file` form field) / delete (`?uri=`) |
+| GET | `/api/documents/tasks/:id` | processing status of an upload |
 
 ## Preview mode
 
-If the page cannot reach `/api/health` (for example when it is opened as a
-static file or hosted without the server), it switches to **preview mode**:
-replies are simulated locally so the layout and controls can still be
-checked on a device.
+Opened without a server (for example as a static page) the UI switches to
+preview mode with simulated replies, so layout can be checked on a device.

@@ -1,13 +1,18 @@
 # Render Blueprint: https://render.com/docs/blueprint-spec
+# One Docker service running Vikingchat + embedded OpenViking, with a
+# persistent disk for memories, documents and chat history.
 services:
   - type: web
     name: vikingchat
-    runtime: node
-    plan: free
+    runtime: docker
+    plan: starter            # disks need a paid plan; free has no persistence
     branch: claude/mobile-ui-testing-setup-tv9utr
-    buildCommand: ""
-    startCommand: npm start
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
+    disk:
+      name: vikingchat-data
+      mountPath: /app/.openviking
+      sizeGB: 1
     envVars:
       - key: AZURE_OPENAI_ENDPOINT
         sync: false
@@ -15,3 +20,9 @@ services:
         sync: false
       - key: AZURE_OPENAI_DEPLOYMENT
         value: gpt-5.1
+      - key: AZURE_OPENAI_PROCESSING_DEPLOYMENT
+        value: gpt-5.4-mini
+      - key: AZURE_OPENAI_EMBEDDING_DEPLOYMENT
+        value: text-embedding-3-large
+      - key: OPENVIKING_WITH_BOT
+        value: "0"
