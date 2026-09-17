@@ -4,8 +4,10 @@
 // Configuration comes from environment variables (see .env.example):
 //   endpoint / AZURE_OPENAI_ENDPOINT   Azure OpenAI resource URL
 //   "api key" / AZURE_OPENAI_API_KEY   Azure OpenAI key
-//   AZURE_OPENAI_DEPLOYMENT            deployment name (default: gpt-4o)
-//   AZURE_OPENAI_API_VERSION           API version (default: 2024-10-21)
+//   AZURE_OPENAI_DEPLOYMENT            deployment name (default: gpt-5.1)
+//   AZURE_OPENAI_API_VERSION           optional; when set, the legacy
+//                                      /openai/deployments/... path is used
+//                                      instead of the version-less v1 API
 //   HOST / PORT                        listen address (default: 0.0.0.0:3000)
 
 import http from "node:http";
@@ -20,8 +22,8 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const env = process.env;
 const ENDPOINT = (env.AZURE_OPENAI_ENDPOINT || env.endpoint || "").replace(/\/+$/, "");
 const API_KEY = env.AZURE_OPENAI_API_KEY || env["api key"] || env.api_key || "";
-const DEPLOYMENT = env.AZURE_OPENAI_DEPLOYMENT || "gpt-4o";
-const API_VERSION = env.AZURE_OPENAI_API_VERSION || "2024-10-21";
+const DEPLOYMENT = env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.1";
+const API_VERSION = env.AZURE_OPENAI_API_VERSION || ""; // empty = v1 API
 const HOST = env.HOST || "0.0.0.0";
 const PORT = Number(env.PORT || 3000);
 
@@ -92,17 +94,23 @@ async function handleChat(req, res) {
     return sendJson(res, 400, { error: "Send at least one user message." });
   }
 
-  const url = `${ENDPOINT}/openai/deployments/${encodeURIComponent(DEPLOYMENT)}/chat/completions?api-version=${encodeURIComponent(API_VERSION)}`;
+  // The v1 API takes the deployment as "model" in the body and needs no
+  // api-version; it supports every current model (gpt-4o, gpt-5.x, o-series).
+  const url = API_VERSION
+    ? `${ENDPOINT}/openai/deployments/${encodeURIComponent(DEPLOYMENT)}/chat/completions?api-version=${encodeURIComponent(API_VERSION)}`
+    : `${ENDPOINT}/openai/v1/chat/completions`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60_000);
   try {
     const upstream = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "api-key": API_KEY },
+      // No temperature: gpt-5.x and o-series reject non-default values.
+      // max_completion_tokens replaces the deprecated max_tokens.
       body: JSON.stringify({
+        model: DEPLOYMENT,
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
-        temperature: 0.7,
-        max_tokens: 800,
+        max_completion_tokens: 1200,
       }),
       signal: controller.signal,
     });
@@ -156,7 +164,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       configured: Boolean(ENDPOINT && API_KEY),
       deployment: DEPLOYMENT,
-      apiVersion: API_VERSION,
+      apiVersion: API_VERSION || "v1",
     });
   }
   if (pathname === "/api/chat") {
@@ -190,7 +198,7 @@ server.listen(PORT, HOST, () => {
   }
   console.log(
     ENDPOINT && API_KEY
-      ? `Azure OpenAI: ${ENDPOINT} (deployment "${DEPLOYMENT}", api-version ${API_VERSION})`
+      ? `Azure OpenAI: ${ENDPOINT} (deployment "${DEPLOYMENT}", ${API_VERSION ? "api-version " + API_VERSION : "v1 API"})`
       : "WARNING: Azure OpenAI endpoint/api key not set; /api/chat will return 503."
   );
 });

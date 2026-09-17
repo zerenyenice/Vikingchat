@@ -16,8 +16,8 @@ The server reads these environment variables (see `.env.example`):
 | --- | --- | --- |
 | `endpoint` or `AZURE_OPENAI_ENDPOINT` | Azure OpenAI resource URL | required |
 | `api key` or `AZURE_OPENAI_API_KEY` | Azure OpenAI key | required |
-| `AZURE_OPENAI_DEPLOYMENT` | deployment name in that resource | `gpt-4o` |
-| `AZURE_OPENAI_API_VERSION` | REST API version | `2024-10-21` |
+| `AZURE_OPENAI_DEPLOYMENT` | deployment name in that resource (`gpt-5.1` or `gpt-5.4-mini`) | `gpt-5.1` |
+| `AZURE_OPENAI_API_VERSION` | optional; set to use the legacy versioned path | unset (v1 API) |
 | `HOST` | listen address | `0.0.0.0` |
 | `PORT` | listen port | `3000` |
 
@@ -29,7 +29,7 @@ Wi-Fi can reach the server.
 ```bash
 export endpoint="https://YOUR-RESOURCE.openai.azure.com/"
 export "api key=YOUR-KEY"                # or AZURE_OPENAI_API_KEY=YOUR-KEY
-export AZURE_OPENAI_DEPLOYMENT=gpt-4o    # your deployment name
+export AZURE_OPENAI_DEPLOYMENT=gpt-5.1   # or gpt-5.4-mini
 npm start
 ```
 
@@ -56,8 +56,9 @@ Both print a public `https://` URL you can open on mobile data.
 1. Sign in at https://dashboard.render.com with GitHub.
 2. New → Web Service → pick the `Vikingchat` repo and this branch.
 3. Leave the build command empty, start command `npm start`.
-4. Add environment variables `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`
-   and `AZURE_OPENAI_DEPLOYMENT`, then Create Web Service.
+4. Add environment variables `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY`
+   (and `AZURE_OPENAI_DEPLOYMENT` if you want something other than `gpt-5.1`),
+   then Create Web Service.
 
 Render assigns `PORT` automatically and gives you an `https://…onrender.com`
 URL. `render.yaml` in this repo pre-fills the same settings for a Blueprint
@@ -70,7 +71,7 @@ request after a pause takes about half a minute.
 docker build -t vikingchat .
 docker run --rm -p 3000:3000 \
   -e endpoint="https://YOUR-RESOURCE.openai.azure.com/" \
-  -e "api key=YOUR-KEY" -e AZURE_OPENAI_DEPLOYMENT=gpt-4o vikingchat
+  -e "api key=YOUR-KEY" -e AZURE_OPENAI_DEPLOYMENT=gpt-5.1 vikingchat
 ```
 
 ## API
