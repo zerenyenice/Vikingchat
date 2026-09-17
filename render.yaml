@@ -1,0 +1,19 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: vikingchat
+    runtime: node
+    plan: free
+    branch: claude/mobile-ui-testing-setup-tv9utr
+    buildCommand: ""
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: AZURE_OPENAI_ENDPOINT
+        sync: false
+      - key: AZURE_OPENAI_API_KEY
+        sync: false
+      - key: AZURE_OPENAI_DEPLOYMENT
+        sync: false
+      - key: AZURE_OPENAI_API_VERSION
+        value: 2024-10-21

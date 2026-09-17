@@ -51,6 +51,19 @@ ngrok http 3000
 
 Both print a public `https://` URL you can open on mobile data.
 
+### Deploy from your phone (Render, free tier)
+
+1. Sign in at https://dashboard.render.com with GitHub.
+2. New → Web Service → pick the `Vikingchat` repo and this branch.
+3. Leave the build command empty, start command `npm start`.
+4. Add environment variables `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`
+   and `AZURE_OPENAI_DEPLOYMENT`, then Create Web Service.
+
+Render assigns `PORT` automatically and gives you an `https://…onrender.com`
+URL. `render.yaml` in this repo pre-fills the same settings for a Blueprint
+deploy. The free plan sleeps after 15 minutes without traffic, so the first
+request after a pause takes about half a minute.
+
 ### Docker
 
 ```bash
