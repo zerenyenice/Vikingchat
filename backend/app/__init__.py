@@ -1,0 +1,1 @@
+"""VikingChat backend package."""
