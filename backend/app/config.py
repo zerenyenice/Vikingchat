@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     # LLM used by the deep agent (LangChain `provider:model` string).
     agent_model: str = "anthropic:claude-opus-5"
     skill_builder_model: str | None = None
+    # Used for `azure_openai:<deployment>` models when OPENAI_API_VERSION is not set.
+    azure_openai_api_version: str = "2025-01-01-preview"
 
     # Memory / recall behaviour
     recall_limit: int = 5

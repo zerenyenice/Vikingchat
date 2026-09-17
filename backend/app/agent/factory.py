@@ -19,13 +19,13 @@ from typing import Any, Callable, Sequence
 from typing_extensions import NotRequired
 
 from deepagents import DeepAgentState, create_deep_agent
-from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langchain_openviking import OpenVikingCommitPolicy, OpenVikingContextMiddleware, create_openviking_tools
 
 from ..config import Settings
 from ..viking import MEMORY_ROOT, SKILLS_ROOT, connection_kwargs, documents_root, user_client
+from .models import build_chat_model
 from .prompts import BASE_PROMPT, SKILL_SESSION_ADDENDUM, format_skills_index
 
 log = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ SkillsLoader = Callable[[Settings, str], "asyncio.Future[list[dict[str, Any]]] |
 
 
 def default_model_factory(settings: Settings) -> BaseChatModel:
-    return init_chat_model(settings.agent_model)
+    return build_chat_model(settings.agent_model, settings)
 
 
 def default_tools_factory(settings: Settings, user_id: str) -> Sequence[BaseTool]:

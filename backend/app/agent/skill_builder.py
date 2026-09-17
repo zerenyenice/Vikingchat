@@ -8,12 +8,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 import yaml
-from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
 
 from ..config import Settings
 from ..viking import SKILLS_ROOT
+from .models import build_chat_model
 from .prompts import SKILL_BUILDER_PROMPT
 
 log = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ def render_skill_md(draft: SkillDraft, *, session_id: str, built_by: str) -> str
 
 
 def default_builder_model(settings: Settings) -> BaseChatModel:
-    return init_chat_model(settings.builder_model)
+    return build_chat_model(settings.builder_model, settings)
 
 
 async def draft_skill(

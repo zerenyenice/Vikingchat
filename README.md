@@ -40,7 +40,10 @@ Users log in and chat with a deep agent that:
 
    ```bash
    cp .env.example .env
-   # required: ANTHROPIC_API_KEY (agent LLM), OPENAI_API_KEY (OpenViking embeddings + VLM), SECRET_KEY
+   # required: ANTHROPIC_API_KEY (agent LLM), OPENAI_API_KEY (OpenViking embeddings + VLM), SECRET_KEY,
+   #           OPENVIKING_ROOT_API_KEY (shared secret between backend and OpenViking)
+   # Azure OpenAI instead: AGENT_MODEL=azure_openai:<deployment>, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY,
+   #           OV_EMBEDDING_PROVIDER=azure, OV_EMBEDDING_MODEL=<deployment>, OV_VLM_PROVIDER=azure, OV_VLM_MODEL=<deployment>
    ```
 
 2. Build and start:
@@ -54,8 +57,10 @@ Users log in and chat with a deep agent that:
 
 The OpenViking container installs `openviking` from PyPI and, on start, writes `/config/ov.conf` from the
 `OV_*` variables (OpenAI-compatible embedding + VLM by default). To use another provider, either set the `OV_*`
-variables (`provider`, `model`, `api_base`, `api_key`, `dimension`) or mount your own config and point
-`OV_CONF_PATH` at it. The full option list is in OpenViking's configuration guide.
+variables (`provider`, `model`, `api_base`, `api_key`, `api_version`, `dimension`) or mount your own config and point
+`OV_CONF_PATH` at it. For Azure OpenAI set `OV_EMBEDDING_PROVIDER=azure` / `OV_VLM_PROVIDER=azure` and use deployment
+names as models; the endpoint, key and API version fall back to `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` and
+`OPENAI_API_VERSION`. The full option list is in OpenViking's configuration guide.
 
 ## Local development
 
@@ -100,10 +105,12 @@ All backend settings are environment variables (or `backend/.env`), see `backend
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `AGENT_MODEL` | `anthropic:claude-opus-5` | LangChain `provider:model` string for the deep agent |
+| `AGENT_MODEL` | `anthropic:claude-opus-5` | LangChain `provider:model` string for the deep agent (`azure_openai:<deployment>` for Azure) |
+| `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` | – | Read by langchain-openai for `azure_openai:` models |
+| `OPENAI_API_VERSION` | `2025-01-01-preview` | Azure OpenAI API version (backend default applies when unset) |
 | `SKILL_BUILDER_MODEL` | same as `AGENT_MODEL` | Model used to distill skill sessions into `SKILL.md` |
 | `OPENVIKING_URL` | `http://localhost:1933` | OpenViking server |
-| `OPENVIKING_API_KEY` | – | API key when the server runs in `api_key` auth mode |
+| `OPENVIKING_API_KEY` | – | OpenViking root key (compose sets it from `OPENVIKING_ROOT_API_KEY`) |
 | `OPENVIKING_ACCOUNT` | `default` | OpenViking account; each app user maps to an OpenViking user (`X-OpenViking-User`) |
 | `SECRET_KEY` | change me | JWT signing key |
 | `DATA_DIR` | `./data` | SQLite DBs (users, sessions, transcripts, LangGraph checkpoints) and upload staging |

@@ -20,22 +20,55 @@ def env(name: str, default: str | None = None) -> str | None:
     return value if value not in (None, "") else default
 
 
+OPENAI_DEFAULT_BASE = "https://api.openai.com/v1"
+AZURE_ENV_ENDPOINT = "AZURE_OPENAI_ENDPOINT"
+AZURE_ENV_API_KEY = "AZURE_OPENAI_API_KEY"
+AZURE_ENV_API_VERSION = "OPENAI_API_VERSION"
+
+
+def model_section(prefix: str, *, default_model: str, extra: dict | None = None) -> dict:
+    """Build the ``embedding.dense`` / ``vlm`` block from ``<prefix>_*`` variables.
+
+    ``provider`` is one of OpenViking's providers (``openai``, ``azure``, ``volcengine``, ...).
+    For ``openai`` the key falls back to ``OPENAI_API_KEY``; for ``azure`` the endpoint, key and
+    API version fall back to the standard ``AZURE_OPENAI_ENDPOINT`` / ``AZURE_OPENAI_API_KEY`` /
+    ``OPENAI_API_VERSION`` variables, and ``model`` is the Azure *deployment* name.
+    """
+    provider = (env(f"{prefix}_PROVIDER", "openai") or "openai").lower()
+    section: dict = {
+        "provider": provider,
+        "model": env(f"{prefix}_MODEL", default_model),
+        "api_key": env(f"{prefix}_API_KEY"),
+        "api_base": env(f"{prefix}_API_BASE"),
+        "api_version": env(f"{prefix}_API_VERSION"),
+    }
+    if provider == "azure":
+        section["api_key"] = section["api_key"] or env(AZURE_ENV_API_KEY)
+        section["api_base"] = section["api_base"] or env(AZURE_ENV_ENDPOINT)
+        section["api_version"] = section["api_version"] or env(AZURE_ENV_API_VERSION)
+        if not section["api_base"]:
+            print(
+                f"[openviking] ERROR: {prefix}_PROVIDER=azure needs {prefix}_API_BASE or "
+                f"{AZURE_ENV_ENDPOINT} (https://<resource>.openai.azure.com)",
+                file=sys.stderr,
+                flush=True,
+            )
+            raise SystemExit(1)
+    elif provider == "openai":
+        section["api_key"] = section["api_key"] or env("OPENAI_API_KEY")
+        section["api_base"] = section["api_base"] or OPENAI_DEFAULT_BASE
+    section.update(extra or {})
+    return {k: v for k, v in section.items() if v is not None}
+
+
 def build_config() -> dict:
     embedding_dim = int(env("OV_EMBEDDING_DIMENSION", "1536"))
-    dense = {
-        "provider": env("OV_EMBEDDING_PROVIDER", "openai"),
-        "model": env("OV_EMBEDDING_MODEL", "text-embedding-3-small"),
-        "api_key": env("OV_EMBEDDING_API_KEY") or env("OPENAI_API_KEY"),
-        "api_base": env("OV_EMBEDDING_API_BASE", "https://api.openai.com/v1"),
-        "dimension": embedding_dim,
-        "input": env("OV_EMBEDDING_INPUT", "text"),
-    }
-    vlm = {
-        "provider": env("OV_VLM_PROVIDER", "openai"),
-        "model": env("OV_VLM_MODEL", "gpt-4o-mini"),
-        "api_key": env("OV_VLM_API_KEY") or env("OPENAI_API_KEY"),
-        "api_base": env("OV_VLM_API_BASE", "https://api.openai.com/v1"),
-    }
+    dense = model_section(
+        "OV_EMBEDDING",
+        default_model="text-embedding-3-small",
+        extra={"dimension": embedding_dim, "input": env("OV_EMBEDDING_INPUT", "text")},
+    )
+    vlm = model_section("OV_VLM", default_model="gpt-4o-mini")
     server: dict = {
         "host": env("OV_SERVER_HOST", "0.0.0.0"),
         "port": int(env("OV_SERVER_PORT", "1933")),
@@ -63,8 +96,8 @@ def build_config() -> dict:
             "workspace": env("OV_WORKSPACE", "/data"),
             "vectordb": {"backend": env("OV_VECTORDB_BACKEND", "local"), "dimension": embedding_dim},
         },
-        "embedding": {"dense": {k: v for k, v in dense.items() if v is not None}},
-        "vlm": {k: v for k, v in vlm.items() if v is not None},
+        "embedding": {"dense": dense},
+        "vlm": vlm,
         "server": server,
     }
     return config
@@ -91,7 +124,11 @@ def main() -> int:
                             holder[key] = "***"
         print(f"[openviking] generated {config_path}:\n{json.dumps(redacted, indent=2)}", flush=True)
         if not config["embedding"]["dense"].get("api_key") or not config["vlm"].get("api_key"):
-            print("[openviking] WARNING: no embedding/VLM API key configured (OPENAI_API_KEY or OV_*_API_KEY)", flush=True)
+            print(
+                "[openviking] WARNING: no embedding/VLM API key configured "
+                "(OV_*_API_KEY, OPENAI_API_KEY or AZURE_OPENAI_API_KEY)",
+                flush=True,
+            )
 
     cmd = [
         "openviking-server",
