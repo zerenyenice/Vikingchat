@@ -5,3 +5,7 @@ data
 *.log
 README.md
 render.yaml
+__pycache__
+*.pyc
+.venv
+agent-venv
