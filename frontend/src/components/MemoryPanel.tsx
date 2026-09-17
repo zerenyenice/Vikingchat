@@ -47,13 +47,13 @@ export default function MemoryPanel({ version }: { version: number }) {
     }
   }
 
-  const files = items.filter((i) => !i.uri.endsWith("/") && (i.is_dir !== true));
+  const files = items.filter((i) => !i.uri.endsWith("/") && i.is_dir !== true && i.isDir !== true);
 
   return (
     <div className="panel">
       <h3>Memory</h3>
       <div className="hint">
-        Long-term memory lives under <code>viking://user/memories</code>. The agent recalls it automatically and stores new facts as
+        Long-term memory lives under <code>viking://~/memories</code> (your private space in OpenViking). The agent recalls it automatically and stores new facts as
         you chat; "Save memories" commits a session for extraction.
       </div>
       <form onSubmit={search} style={{ display: "flex", gap: 6 }}>
@@ -66,7 +66,7 @@ export default function MemoryPanel({ version }: { version: number }) {
       {files.map((item) => (
         <div key={item.uri} className="card">
           <div className="row">
-            <span className="name" title={item.uri}>{item.uri.replace("viking://user/memories/", "")}</span>
+            <span className="name" title={item.uri}>{item.uri.replace(/^viking:\/\/(~|user\/[^/]+)\/memories\//, "")}</span>
             {typeof item.score === "number" && <span className="status">{item.score.toFixed(2)}</span>}
           </div>
           {item.abstract && <div className="desc">{String(item.abstract)}</div>}

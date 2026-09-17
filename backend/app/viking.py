@@ -15,9 +15,31 @@ from openviking_sdk import AsyncHTTPClient
 
 from .config import Settings
 
-MEMORY_ROOT = "viking://user/memories"
+# ``viking://~`` is OpenViking's home alias for the calling user (the ``X-OpenViking-User``
+# header). Listings and search results come back in the explicit ``viking://user/<id>/...``
+# form, so both spellings must be accepted wherever a client hands a memory URI back to us.
+MEMORY_ROOT = "viking://~/memories"
 SKILLS_ROOT = "viking://agent/skills"
 RESOURCES_ROOT = "viking://resources"
+
+
+def memory_root(user_id: str) -> str:
+    """Explicit (non-alias) memory root for ``user_id``, as OpenViking reports it."""
+    return f"viking://user/{user_id}/memories"
+
+
+def memory_roots(user_id: str) -> tuple[str, str]:
+    return MEMORY_ROOT, memory_root(user_id)
+
+
+def is_memory_uri(uri: str, user_id: str) -> bool:
+    """True if ``uri`` is the user's memory root or something underneath it."""
+    uri = uri.rstrip("/")
+    return any(uri == root or uri.startswith(root + "/") for root in memory_roots(user_id))
+
+
+def is_memory_root(uri: str, user_id: str) -> bool:
+    return uri.rstrip("/") in memory_roots(user_id)
 
 
 def documents_root(user_id: str) -> str:

@@ -6,7 +6,7 @@ An agent chat application built on **[LangChain Deep Agents](https://docs.langch
 Users log in and chat with a deep agent that:
 
 - **remembers** – OpenViking sessions record every turn; relevant memories are recalled before each model call and
-  new long-term facts are stored under `viking://user/memories`
+  new long-term facts are stored under `viking://~/memories` (the user's private OpenViking space)
 - **reads your documents** – uploads are ingested as OpenViking resources (`viking://resources/users/<user>/…`) and
   searched semantically by the agent
 - **learns skills** – a *skill session* is a chat in which you teach the agent a procedure; clicking **Build skill**
@@ -136,7 +136,7 @@ draft (`name`, `description`, `tags`, `instructions`), writes a SKILL.md with YA
 `client.add_skill(...)` (or `update_skill` when rebuilding). Agents for that user are rebuilt so the new skill appears
 in their prompt immediately.
 
-**Memory (`app/routers/memory.py`).** Browse/search/read/delete under `viking://user/memories`; *Save memories* in the
+**Memory (`app/routers/memory.py`).** Browse/search/read/delete under `viking://~/memories` (OpenViking's per-user home alias; results come back as `viking://user/<id>/memories/...`); *Save memories* in the
 chat header calls `commit_session` so OpenViking archives the session and extracts memories right away.
 
 ## API overview
@@ -155,7 +155,10 @@ chat header calls `commit_session` so OpenViking archives the session and extrac
 
 ## Notes
 
-- OpenViking runs in **dev auth mode** unless `OPENVIKING_ROOT_API_KEY` is set; in dev mode users are isolated by the
-  `X-OpenViking-User` header only, so put the server on a private network. For multi-tenant deployments switch to
-  `api_key` mode and provision users with the OpenViking admin API.
+- OpenViking runs in **trusted auth mode** with `OPENVIKING_ROOT_API_KEY` as a shared secret: the backend presents the
+  key on every request and OpenViking scopes the request to the `X-OpenViking-Account`/`X-OpenViking-User` headers the
+  backend sets for the logged-in user. Anyone holding the key can act as any user, so keep the OpenViking port on a
+  private network (or drop the `ports:` mapping for the `openviking` service). OpenViking refuses to start without a
+  root key when bound to a non-loopback address, and its `api_key` mode ignores the per-user headers, which is why
+  `trusted` is used. Set `OV_AUTH_MODE` to override.
 - OpenViking is AGPL-3.0 licensed; this project only talks to it over HTTP.

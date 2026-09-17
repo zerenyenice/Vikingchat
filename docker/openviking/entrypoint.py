@@ -41,10 +41,23 @@ def build_config() -> dict:
         "port": int(env("OV_SERVER_PORT", "1933")),
         "cors_origins": ["*"],
     }
+    # "trusted" mode: OpenViking trusts the X-OpenViking-Account/User headers that the backend
+    # sets per logged-in user, so every user gets an isolated namespace. When the server binds
+    # to a non-loopback address (always the case in Docker) OpenViking additionally requires a
+    # root API key, which the backend presents on every request.
+    server["auth_mode"] = env("OV_AUTH_MODE", "trusted")
     root_key = env("OPENVIKING_ROOT_API_KEY")
     if root_key:
         server["root_api_key"] = root_key
-        server["auth_mode"] = "api_key"
+    elif server["host"] not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "[openviking] ERROR: OPENVIKING_ROOT_API_KEY is not set. OpenViking refuses to run "
+            f"auth_mode={server['auth_mode']!r} on {server['host']} without a root API key. "
+            "Set OPENVIKING_ROOT_API_KEY in .env (e.g. `openssl rand -hex 32`).",
+            file=sys.stderr,
+            flush=True,
+        )
+        raise SystemExit(1)
     config = {
         "storage": {
             "workspace": env("OV_WORKSPACE", "/data"),

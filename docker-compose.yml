@@ -7,6 +7,7 @@ services:
     environment:
       OV_SERVER_HOST: 0.0.0.0
       OV_SERVER_PORT: "1933"
+      OPENVIKING_ROOT_API_KEY: ${OPENVIKING_ROOT_API_KEY:?Set OPENVIKING_ROOT_API_KEY in .env (e.g. openssl rand -hex 32)}
     ports:
       - "${OPENVIKING_PORT:-1933}:1933"
     volumes:
@@ -21,7 +22,7 @@ services:
     env_file: .env
     environment:
       OPENVIKING_URL: http://openviking:1933
-      OPENVIKING_API_KEY: ${OPENVIKING_ROOT_API_KEY:-}
+      OPENVIKING_API_KEY: ${OPENVIKING_ROOT_API_KEY:?Set OPENVIKING_ROOT_API_KEY in .env (e.g. openssl rand -hex 32)}
       DATA_DIR: /data
       CORS_ORIGINS: '["http://localhost:${UI_PORT:-8080}","http://localhost:5173"]'
     depends_on:

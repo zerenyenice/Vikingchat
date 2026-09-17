@@ -68,10 +68,26 @@ class FakeVikingClient:
     def __init__(self, *args: Any, user: str | None = None, **kwargs: Any) -> None:
         self.user = user
         self.calls: list[tuple[str, dict[str, Any]]] = []
-        self.store: dict[str, str] = {
-            "viking://user/memories/preferences/style.md": "Prefers concise answers.",
-        }
+        # Keys are stored in the explicit ``viking://user/<id>/...`` form, like the real server.
+        self.store: dict[str, str] = {}
         self.skills: dict[str, str] = {}
+        self.seed_memory = ("~/memories/preferences/style.md", "Prefers concise answers.")
+        self._seeded: set[str] = set()
+
+    def bind(self, user_id: str) -> "FakeVikingClient":
+        """Emulate build_client(): scope this instance to ``user_id``, seeding its memory once."""
+        self.user = user_id
+        if user_id not in self._seeded:
+            self._seeded.add(user_id)
+            path, content = self.seed_memory
+            self.store[self._expand(f"viking://{path}")] = content
+        return self
+
+    def _expand(self, uri: str) -> str:
+        """Expand OpenViking's ``viking://~`` home alias to the bound user's explicit root."""
+        if uri.startswith("viking://~/") or uri == "viking://~":
+            return f"viking://user/{self.user}" + uri[len("viking://~"):]
+        return uri
 
     async def initialize(self) -> None:
         self.calls.append(("initialize", {}))
@@ -129,15 +145,17 @@ class FakeVikingClient:
 
     async def rm(self, uri: str, **kwargs: Any) -> None:
         self.calls.append(("rm", {"uri": uri}))
-        self.store.pop(uri, None)
+        self.store.pop(self._expand(uri), None)
 
     async def ls(self, uri: str, **kwargs: Any) -> list[Any]:
+        uri = self._expand(uri)
         return [{"uri": u, "abstract": c[:40]} for u, c in self.store.items() if u.startswith(uri)]
 
     async def read(self, uri: str, **kwargs: Any) -> str:
-        return self.store[uri]
+        return self.store[self._expand(uri)]
 
     async def find(self, query: str = "", target_uri: Any = "", limit: int = 10, **kwargs: Any) -> dict[str, Any]:
+        target_uri = self._expand(target_uri) if isinstance(target_uri, str) else target_uri
         items = [
             {"uri": u, "abstract": c, "score": 0.9}
             for u, c in self.store.items()
@@ -155,7 +173,7 @@ class FakeVikingClient:
 @pytest.fixture
 def fake_viking(monkeypatch: pytest.MonkeyPatch) -> FakeVikingClient:
     client = FakeVikingClient()
-    monkeypatch.setattr(viking, "build_client", lambda settings, user_id: client)
+    monkeypatch.setattr(viking, "build_client", lambda settings, user_id: client.bind(user_id))
     return client
 
 
