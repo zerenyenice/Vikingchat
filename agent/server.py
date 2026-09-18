@@ -350,7 +350,7 @@ def _summarise_tool_calls(new_messages: list[Any]) -> tuple[list[dict[str, Any]]
                 if token.startswith(UPLOADS_URI + "/"):
                     rel = token[len(UPLOADS_URI) + 1:]
                     name = rel.split("/")[0].rstrip(",)]")
-                    if name:
+                    if name and not name.startswith("."):  # skip OpenViking's own index files
                         sources.setdefault(name, f"{UPLOADS_URI}/{name}")
     return calls, memory_updated, [{"name": n, "uri": u} for n, u in sources.items()]
 

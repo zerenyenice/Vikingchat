@@ -47,7 +47,7 @@ const UPLOADS_URI = "viking://resources/uploads";
 const MEMORIES_URI = `viking://user/${OV_USER}/memories`;
 const AGENT_URL = (env.AGENT_URL ?? "http://127.0.0.1:8100").replace(/\/+$/, "");
 const AGENT_ENABLED = Boolean(AGENT_URL) && env.AGENT_DISABLED !== "1";
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = Number(env.MAX_UPLOAD_MB || 10) * 1024 * 1024;
 
 const SYSTEM_PROMPT =
   env.SYSTEM_PROMPT ||
@@ -368,13 +368,13 @@ async function handleTurn(req, res, chatId) {
 
 async function handleUpload(req, res) {
   const len = Number(req.headers["content-length"] || 0);
-  if (len > MAX_UPLOAD_BYTES) throw new HttpError(413, "File is larger than 25 MB.");
+  if (len > MAX_UPLOAD_BYTES) throw new HttpError(413, `File is larger than ${MAX_UPLOAD_BYTES / 1048576} MB.`);
   const webReq = new Request("http://local/upload", { method: "POST", headers: req.headers, body: Readable.toWeb(req), duplex: "half" });
   let form;
   try { form = await webReq.formData(); } catch (err) { throw new HttpError(400, `Could not read upload: ${err.message}`); }
   const file = form.get("file");
   if (!file || typeof file === "string") throw new HttpError(400, "Send the document as a 'file' form field.");
-  if (file.size > MAX_UPLOAD_BYTES) throw new HttpError(413, "File is larger than 25 MB.");
+  if (file.size > MAX_UPLOAD_BYTES) throw new HttpError(413, `File is larger than ${MAX_UPLOAD_BYTES / 1048576} MB.`);
 
   const safeName = file.name.replace(/[^\w.\- ()\[\]]+/g, "_").trim() || "document";
   const folder = safeName.replace(/\.[^.]+$/, "").replace(/\s+/g, "-").toLowerCase() || "document";
@@ -399,7 +399,8 @@ async function listDocuments() {
   try { entries = await ov(`/api/v1/fs/ls?uri=${encodeURIComponent(UPLOADS_URI + "/")}&sort_by=mtime`); }
   catch (err) { if (err.status === 404) return []; throw err; }
   return (Array.isArray(entries) ? entries : entries?.entries ?? []).map((e) => ({
-    name: e.name, uri: e.uri, isDir: e.isDir ?? e.is_dir ?? false, size: e.size ?? null, modified: e.modTime ?? e.mtime ?? null,
+    name: e.name || String(e.uri || "").replace(/\/+$/, "").split("/").pop() || "document",
+    uri: e.uri, isDir: e.isDir ?? e.is_dir ?? false, size: e.size ?? null, modified: e.modTime ?? e.mtime ?? null,
   }));
 }
 

@@ -391,7 +391,7 @@
     up.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0 -4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg> Upload a document';
     up.addEventListener("click", () => fileInput.click());
     panel.append(up);
-    const hint = document.createElement("div"); hint.className = "hint"; hint.textContent = "PDF, Word, PowerPoint, Excel, Markdown, text or HTML, up to 25 MB. Documents are stored under viking://resources/uploads and searched on every message.";
+    const hint = document.createElement("div"); hint.className = "hint"; hint.textContent = "PDF, Word, PowerPoint, Excel, Markdown, text or HTML, up to 10 MB. Documents are stored under viking://resources/uploads and searched on every message.";
     panel.append(hint);
     if (mode === "preview" || !ovReady) { const e = document.createElement("div"); e.className = "empty"; e.textContent = mode === "preview" ? "Connect a server to upload documents." : "OpenViking is not reachable right now."; panel.append(e); return; }
     let docs = [];
