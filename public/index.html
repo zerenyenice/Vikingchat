@@ -130,7 +130,9 @@
   .row .del { width: 32px; height: 32px; border-radius: 50%; border: 0; background: transparent; color: var(--muted); display: grid; place-items: center; flex: none; }
   .row .del svg { width: 16px; height: 16px; }
   .memory-item { padding: 10px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; }
-  .memory-item .cat { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--sea); display: block; margin-bottom: 4px; }
+  .memory-item .cat { font-size: 11px; letter-spacing: .02em; color: var(--sea); display: block; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .memory-item .del { width: 28px; height: 28px; border-radius: 50%; border: 0; background: transparent; color: var(--muted); display: grid; place-items: center; flex: none; }
+  .memory-item .del svg { width: 14px; height: 14px; }
   .memory-item p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .drawer .upload-btn { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border-radius: 12px; border: 1px dashed var(--line); background: transparent; color: var(--sea); }
   .drawer .upload-btn svg { width: 18px; height: 18px; }
@@ -440,19 +442,38 @@
   }
 
   // ---- memory -------------------------------------------------------------
+  const KIND_LABEL = { profile: "Profile", preference: "Preferences", procedure: "How I help you", entity: "People & projects", event: "Events", reflection: "Reflections", index: "Index", other: "Other" };
   async function refreshMemory() {
     const panel = $("panel-memory"); panel.replaceChildren();
-    const hint = document.createElement("div"); hint.className = "hint"; hint.textContent = "What Vikingchat has learned about you. The agent decides itself what to remember and writes these files during the conversation.";
+    const hint = document.createElement("div"); hint.className = "hint";
+    hint.textContent = "What Vikingchat knows about you, saved by the agent during conversations with date and source. Superseded facts are kept as history.";
     panel.append(hint);
     if (mode === "preview" || !ovReady) { const e = document.createElement("div"); e.className = "empty"; e.textContent = mode === "preview" ? "Connect a server to see memories." : "OpenViking is not reachable right now."; panel.append(e); return; }
     let mem;
     try { mem = await api("/api/memory"); } catch (err) { const e = document.createElement("div"); e.className = "empty"; e.textContent = err.message; panel.append(e); return; }
-    if (!mem.items?.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "Nothing remembered yet. Chat a little, then check back in a couple of minutes."; panel.append(e); return; }
+    const bar = document.createElement("div"); bar.className = "hint"; bar.style.display = "flex"; bar.style.alignItems = "center"; bar.style.gap = "8px";
+    const lc = mem.status?.lastConsolidation;
+    const info = document.createElement("span"); info.style.flex = "1";
+    info.textContent = lc?.at ? `Last consolidation ${dateLabel(Date.parse(lc.at))}${lc.changed != null ? ` · ${lc.changed} file(s) changed` : ""}` : "Not consolidated yet";
+    const btn = document.createElement("button"); btn.className = "chip"; btn.type = "button"; btn.textContent = "Consolidate now";
+    btn.addEventListener("click", async () => { btn.disabled = true; btn.textContent = "Consolidating…";
+      try { const r = await api("/api/memory/consolidate", { method: "POST" }); alert(r.skipped ? `Skipped: ${r.skipped}` : `Done: ${r.changed ?? 0} file(s) changed, ${r.deleted ?? 0} pruned. ${r.notes || ""}`); }
+      catch (err) { alert(err.message); } refreshMemory(); });
+    bar.append(info, btn); panel.append(bar);
+    if (!mem.items?.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "Nothing remembered yet. Tell me about yourself and check back."; panel.append(e); return; }
+    let lastKind = null;
     for (const it of mem.items) {
+      if (it.kind !== lastKind) { const h = document.createElement("div"); h.className = "hint"; h.style.marginTop = "8px"; h.style.fontWeight = "700"; h.textContent = KIND_LABEL[it.kind] || it.kind; panel.append(h); lastKind = it.kind; }
       const el = document.createElement("div"); el.className = "memory-item";
-      const c = document.createElement("span"); c.className = "cat"; c.textContent = it.category || "memory";
-      const p = document.createElement("p"); p.textContent = it.text;
-      el.append(c, p); panel.append(el);
+      const head = document.createElement("div"); head.style.display = "flex"; head.style.alignItems = "center"; head.style.gap = "6px";
+      const c = document.createElement("span"); c.className = "cat"; c.style.flex = "1"; c.style.marginBottom = "0"; c.textContent = it.rel;
+      const del = document.createElement("button"); del.className = "del"; del.type = "button"; del.title = "Delete this memory file"; del.setAttribute("aria-label", "Delete memory file");
+      del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>';
+      del.addEventListener("click", async () => { if (!confirm(`Delete “${it.rel}” from memory? This cannot be undone.`)) return;
+        try { await api(`/api/memory?uri=${encodeURIComponent(it.uri)}`, { method: "DELETE" }); } catch (err) { alert(err.message); } refreshMemory(); });
+      head.append(c, del);
+      const p = document.createElement("p"); p.textContent = it.text.replace(/^# .*\n?/, "").trim();
+      el.append(head, p); panel.append(el);
     }
   }
 

@@ -404,20 +404,30 @@ async function listDocuments() {
   }));
 }
 
+const MEMORY_KIND_OF = (rel) => rel === "profile.md" ? "profile" : rel === "_index.md" ? "index"
+  : ({ preferences: "preference", procedures: "procedure", entities: "entity", events: "event", reflections: "reflection" })[rel.split("/")[0]] || "other";
+
 async function memoryOverview() {
   let entries = [];
   try {
-    const r = await ov(`/api/v1/fs/ls?uri=${encodeURIComponent(MEMORIES_URI + "/")}&recursive=true&limit=200`);
+    const r = await ov(`/api/v1/fs/ls?uri=${encodeURIComponent(MEMORIES_URI + "/")}&recursive=true&limit=300`);
     entries = Array.isArray(r) ? r : r?.entries ?? [];
   } catch (err) { if (err.status !== 404) throw err; }
   // Hide OpenViking's seeded persona files; they are not facts about the user.
-  const files = entries.filter((e) => !(e.isDir ?? e.is_dir) && !/\/(identity|soul)\.md$/.test(e.uri || "")).slice(0, 40);
+  const files = entries.filter((e) => !(e.isDir ?? e.is_dir) && e.uri && !/\/(identity|soul)\.md$/.test(e.uri) && !/\/\.[^/]+$/.test(e.uri)).slice(0, 80);
   const items = [];
   for (const f of files) {
-    const text = await readContent(f.uri, 600);
-    if (text) items.push({ name: f.name, uri: f.uri, category: f.uri.replace(MEMORIES_URI + "/", "").split("/")[0].replace(/\.md$/, ""), text });
+    const rel = f.uri.replace(MEMORIES_URI + "/", "");
+    const text = await readContent(f.uri, 1200);
+    if (text) items.push({ name: f.name || rel.split("/").pop(), rel, uri: f.uri, kind: MEMORY_KIND_OF(rel), modified: f.modTime ?? f.mtime ?? null, text });
   }
-  return { user: OV_USER, count: files.length, items };
+  let status = null;
+  if (AGENT_ENABLED) {
+    try { const r = await fetch(`${AGENT_URL}/memory/status`, { signal: AbortSignal.timeout(5_000) }); if (r.ok) status = await r.json(); } catch {}
+  }
+  const order = ["profile", "preference", "procedure", "entity", "event", "reflection", "index", "other"];
+  items.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || (b.rel > a.rel ? 1 : -1));
+  return { user: OV_USER, count: items.length, items, status };
 }
 
 // Diagnostics for remote debugging: readiness of each process, memory, and
@@ -503,6 +513,21 @@ async function route(req, res) {
   }
   if ((match = p.match(/^\/api\/chats\/([^/]+)\/messages$/)) && m === "POST") return handleTurn(req, res, match[1]);
   if (p === "/api/memory" && m === "GET") return sendJson(res, 200, await memoryOverview());
+  if (p === "/api/memory" && m === "DELETE") {
+    const uri = url.searchParams.get("uri") || "";
+    if (!uri.startsWith(MEMORIES_URI + "/")) throw new HttpError(400, "Only memory files can be deleted here.");
+    await ov(`/api/v1/fs?uri=${encodeURIComponent(uri)}&recursive=true`, { method: "DELETE" });
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === "/api/memory/consolidate" && m === "POST") {
+    if (!AGENT_ENABLED) throw new HttpError(503, "The agent service is not enabled.");
+    let r;
+    try { r = await fetch(`${AGENT_URL}/consolidate?force=1`, { method: "POST", signal: AbortSignal.timeout(240_000) }); }
+    catch (err) { throw new HttpError(503, `Agent unreachable: ${err.message}`); }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new HttpError(502, data.error || `Agent error (${r.status})`);
+    return sendJson(res, 200, data);
+  }
   if (p === "/api/documents" && m === "GET") return sendJson(res, 200, { documents: await listDocuments() });
   if (p === "/api/documents" && m === "POST") return handleUpload(req, res);
   if (p === "/api/documents" && m === "DELETE") {

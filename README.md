@@ -40,6 +40,48 @@ Models used:
 | Memory extraction, document summaries | `AZURE_OPENAI_PROCESSING_DEPLOYMENT` | `gpt-5.4-mini` |
 | Embeddings for search | `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` | `text-embedding-3-large` |
 
+## Memory design
+
+Vikingchat's memory follows the taxonomy that agent-memory research converged on
+(CoALA; the 2026 memory surveys; Mem0, Zep, A-MEM, LangMem, MemoryOS). It is
+implemented in `agent/memory.py` and stored as Markdown in OpenViking under
+`viking://user/<user>/memories`.
+
+**Five kinds, each a file the agent writes with the `remember` tool:**
+
+| Kind | Cognitive type | File | Loaded every turn |
+| --- | --- | --- | --- |
+| profile | semantic | `profile.md` | yes |
+| preference | semantic | `preferences/<topic>.md` | yes |
+| procedure | procedural | `procedures/<topic>.md` | yes |
+| entity | semantic | `entities/<name>.md` | on match |
+| event | episodic | `events/<date>-<slug>.md` | 5 most recent |
+| reflection | reflective | `reflections/<date>.md` | on match |
+
+**Practices drawn from the research:**
+
+- **Provenance on every record.** Each line is
+  `- [YYYY-MM-DD · chat <id> · stated|inferred] text`, so every fact carries a
+  date, the chat it came from, and whether the user said it or the agent
+  inferred it.
+- **Never overwrite; supersede.** A replaced fact keeps its line, tagged
+  `· superseded YYYY-MM-DD`, so temporal questions ("where did I live before")
+  still work. `forget` is a soft delete that supersedes.
+- **Always-load core, retrieve the rest.** Profile, preferences, procedures and
+  recent events go into every prompt; entities, older events and documents come
+  through hybrid retrieval (OpenViking vector search + keyword grep, reranked by
+  score, recency and kind, cut to a token budget).
+- **Hot path + background consolidation.** The agent saves in the turn (hot
+  path). A scheduled "sleep" pass (`/consolidate`, cheap model) dedupes, resolves
+  contradictions, ages old events into a reflection, prunes, and rebuilds
+  `_index.md`.
+- **Governance.** An append-only audit log (`memory-audit.jsonl`) records every
+  write; the Memory tab lets the user read and delete anything; memory is treated
+  as data, never as instructions; secrets are never stored.
+
+The Memory tab in the app groups records by kind, shows provenance, and has a
+Consolidate button. See the research write-up for sources and rationale.
+
 ## Configuration
 
 | Variable | Purpose | Default |
