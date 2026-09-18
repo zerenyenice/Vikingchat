@@ -108,6 +108,9 @@ Every turn, a block called <auto_recall> is added to these instructions: the alw
 - Never say "I don't have access to your data", "I don't check OpenViking" or "you haven't told me" without having searched. If nothing relevant exists after searching, say what you looked for and ask the user for it.
 - The user should never have to tell you to look at their documents or memory. Looking is your job.
 
+## Skills (reusable procedures you build)
+You can turn what worked in a conversation into a **skill**: a named, reusable procedure you apply in later chats. The <auto_recall> block lists the skills that exist ("Available skills"). When the user's request matches a skill's "when to use", read that file with `read_file /memories/skills/<slug>.md` and follow its steps. Create a skill with the `create_skill` tool when the user asks (or clicks "Create skill"), or when you notice a repeatable multi-step task worth saving. Keep steps concrete and general enough to reuse; do not bake in one-off values.
+
 ## Documents
 The user's uploaded documents are in OpenViking under `{UPLOADS_URI}`. Ground answers in them when they are relevant and name the document you used. Quote the exact values found (addresses, numbers, dates) rather than paraphrasing.
 
@@ -441,14 +444,25 @@ def make_memory_tools(store: MemoryStore, current_chat: Callable[[], str | None]
 
     @tool
     def recall(query: str, kinds: str | None = None) -> str:
-        """Search all memory about the user by meaning and keywords. kinds: optional comma list of profile,preference,procedure,entity,event."""
+        """Search all memory about the user by meaning and keywords. kinds: optional comma list of profile,preference,procedure,entity,event,skill."""
         ks = tuple(k.strip() for k in kinds.split(",") if k.strip()) if kinds else None
         hits = store.recall(query, limit=8, kinds=ks)
         if not hits:
             return "No matching memories."
         return "\n\n".join(f"/memories/{h.rel} [{h.kind}] ({', '.join(h.why)})\n{h.text}" for h in hits)
 
-    return [remember, forget, recall]
+    @tool
+    def create_skill(name: str, when_to_use: str, steps: str) -> str:
+        """Save a reusable skill (a repeatable procedure) so you can apply it in future chats.
+        name: short skill name. when_to_use: one line describing the situations this skill applies to.
+        steps: the procedure as a numbered Markdown list, plus any notes. Distill it from what worked in this conversation."""
+        try:
+            r = store.save_skill(name, when_to_use, steps, chat=current_chat())
+        except ValueError as err:
+            return f"Error: {err}"
+        return f"Saved skill '{r['name']}' at /memories/{r['path']}."
+
+    return [remember, forget, recall, create_skill]
 
 
 # ---------------------------------------------------------------------------
@@ -604,6 +618,30 @@ class AgentService:
         with TURN_LOCK:  # never run while a turn is writing memory
             return store.consolidate(self.consolidation_llm, retention_days=EVENT_RETENTION_DAYS)
 
+    SKILL_PROMPT = """You turn a conversation into ONE reusable skill for a personal assistant: a named, repeatable procedure the assistant can apply in future, unrelated chats.
+From the transcript, identify the useful multi-step task that was accomplished (or the approach the user preferred) and generalise it. Do NOT bake in one-off values (specific names, dates, numbers) — describe them as inputs to gather.
+Return ONLY JSON: {"name": "<3-6 word skill name>", "when_to_use": "<one line describing the trigger situations>", "steps": "<numbered Markdown list of steps, then an optional '## Notes' section>"}.
+If the conversation contains nothing worth saving as a repeatable skill, return {"name": "", "when_to_use": "", "steps": ""}."""
+
+    def distill_skill(self, chat_id: str, history: list[dict[str, str]]) -> dict[str, Any]:
+        self.ensure_ready()
+        transcript = "\n".join(f"{m.get('role')}: {str(m.get('content',''))[:2000]}" for m in history if str(m.get("content", "")).strip())
+        if not transcript.strip():
+            raise BadRequest("This chat has no conversation to build a skill from yet.")
+        raw = self.consolidation_llm(self.SKILL_PROMPT, transcript[:24000])
+        try:
+            from memory import _parse_json
+            plan = _parse_json(raw)
+        except Exception as err:  # noqa: BLE001
+            raise RuntimeError(f"could not parse skill from the conversation: {err}")
+        name = str(plan.get("name") or "").strip()
+        if not name:
+            return {"created": False, "reason": "Nothing in this chat was worth saving as a reusable skill yet."}
+        self._current_chat.id = chat_id
+        with TURN_LOCK:
+            r = self.store.save_skill(name, str(plan.get("when_to_use") or ""), str(plan.get("steps") or ""), chat=chat_id)
+        return {"created": True, "name": r["name"], "path": r["path"], "when_to_use": str(plan.get("when_to_use") or "")}
+
     def memory_status(self) -> dict[str, Any]:
         st = self.store
         return {
@@ -662,6 +700,19 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as err:  # noqa: BLE001
                 log.exception("consolidation failed")
                 return self._send(502, {"error": f"Consolidation failed: {err}"})
+        if route == "/skill":
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                history = body.get("messages") or []
+                if not isinstance(history, list):
+                    raise BadRequest("messages must be a list")
+                return self._send(200, SERVICE.distill_skill(str(body.get("chat_id") or "chat"), history))
+            except (BadRequest, json.JSONDecodeError) as err:
+                return self._send(400, {"error": str(err)})
+            except Exception as err:  # noqa: BLE001
+                log.exception("skill distillation failed")
+                return self._send(502, {"error": f"Skill creation failed: {err}"})
         if route != "/chat":
             return self._send(404, {"error": "not found"})
         try:

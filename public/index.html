@@ -176,6 +176,9 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.4 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.65 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></svg>
     </button>
     <input type="file" id="file" hidden accept=".pdf,.doc,.docx,.md,.txt,.html,.htm,.csv,.xlsx,.xls,.pptx,.ppt,.epub,.json">
+    <button class="ghost" type="button" id="makeSkill" title="Create a reusable skill from this chat" aria-label="Create a skill from this chat" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v4M3 5h4M6 17v4M4 19h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5z"/></svg>
+    </button>
     <textarea id="input" rows="1" placeholder="Message Vikingchat…" autocomplete="off" enterkeyhint="send" aria-label="Message"></textarea>
     <button class="send" type="submit" id="send" aria-label="Send" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
@@ -198,10 +201,12 @@
       <button class="tab" role="tab" id="tab-chats" aria-selected="true" data-panel="chats" type="button">Chats</button>
       <button class="tab" role="tab" id="tab-docs" aria-selected="false" data-panel="docs" type="button">Documents</button>
       <button class="tab" role="tab" id="tab-memory" aria-selected="false" data-panel="memory" type="button">Memory</button>
+      <button class="tab" role="tab" id="tab-skills" aria-selected="false" data-panel="skills" type="button">Skills</button>
     </div>
     <div class="panel" id="panel-chats" role="tabpanel"></div>
     <div class="panel" id="panel-docs" role="tabpanel" hidden></div>
     <div class="panel" id="panel-memory" role="tabpanel" hidden></div>
+    <div class="panel" id="panel-skills" role="tabpanel" hidden></div>
   </aside>
 </div>
 
@@ -287,6 +292,7 @@
     for (const m of msgs) log.append(renderMessage(m));
     chips.hidden = msgs.length > 0;
     titleEl.textContent = current && msgs.length ? current.title : "Vikingchat";
+    updateSkillButton();
     scrollToEnd();
   }
   function scrollToEnd() { log.scrollTop = log.scrollHeight; }
@@ -385,7 +391,7 @@
       hideTyping();
       log.append(renderMessage({ role: "assistant", error: true, ts: Date.now(), content: "Couldn’t get a reply: " + err.message }));
     } finally {
-      busy = false; send.disabled = !input.value.trim(); scrollToEnd(); input.focus();
+      busy = false; send.disabled = !input.value.trim(); updateSkillButton(); scrollToEnd(); input.focus();
     }
   }
 
@@ -442,7 +448,7 @@
   }
 
   // ---- memory -------------------------------------------------------------
-  const KIND_LABEL = { profile: "Profile", preference: "Preferences", procedure: "How I help you", entity: "People & projects", event: "Events", reflection: "Reflections", index: "Index", other: "Other" };
+  const KIND_LABEL = { profile: "Profile", preference: "Preferences", procedure: "How I help you", entity: "People & projects", event: "Events", reflection: "Reflections", skill: "Skills", index: "Index", other: "Other" };
   async function refreshMemory() {
     const panel = $("panel-memory"); panel.replaceChildren();
     const hint = document.createElement("div"); hint.className = "hint";
@@ -462,7 +468,9 @@
     bar.append(info, btn); panel.append(bar);
     if (!mem.items?.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "Nothing remembered yet. Tell me about yourself and check back."; panel.append(e); return; }
     let lastKind = null;
-    for (const it of mem.items) {
+    const memItems = mem.items.filter((it) => it.kind !== "skill");  // skills have their own tab
+    if (!memItems.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "Nothing remembered yet. Tell me about yourself and check back."; panel.append(e); return; }
+    for (const it of memItems) {
       if (it.kind !== lastKind) { const h = document.createElement("div"); h.className = "hint"; h.style.marginTop = "8px"; h.style.fontWeight = "700"; h.textContent = KIND_LABEL[it.kind] || it.kind; panel.append(h); lastKind = it.kind; }
       const el = document.createElement("div"); el.className = "memory-item";
       const head = document.createElement("div"); head.style.display = "flex"; head.style.alignItems = "center"; head.style.gap = "6px";
@@ -477,13 +485,69 @@
     }
   }
 
+  // ---- skills -------------------------------------------------------------
+  async function refreshSkills() {
+    const panel = $("panel-skills"); panel.replaceChildren();
+    const hint = document.createElement("div"); hint.className = "hint";
+    hint.textContent = "Reusable procedures the agent builds from your chats and applies later. Create one from the current chat, or ask in chat: “make a skill from this”.";
+    panel.append(hint);
+    const make = document.createElement("button"); make.className = "newchat"; make.type = "button"; make.style.marginLeft = "0"; make.style.marginRight = "0";
+    make.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v4M3 5h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5z"/></svg> Create skill from this chat';
+    make.addEventListener("click", () => { closeDrawer(); createSkillFromChat(); });
+    panel.append(make);
+    if (mode === "preview" || !ovReady) { const e = document.createElement("div"); e.className = "empty"; e.textContent = mode === "preview" ? "Connect a server to use skills." : "OpenViking is not reachable right now."; panel.append(e); return; }
+    let mem;
+    try { mem = await api("/api/memory"); } catch (err) { const e = document.createElement("div"); e.className = "empty"; e.textContent = err.message; panel.append(e); return; }
+    const skills = (mem.items || []).filter((it) => it.kind === "skill");
+    if (!skills.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "No skills yet."; panel.append(e); return; }
+    for (const it of skills) {
+      const lines = it.text.split("\n");
+      const name = (lines.find((l) => l.startsWith("# Skill:")) || "").replace("# Skill:", "").trim() || it.rel.split("/").pop().replace(".md", "");
+      const when = (lines.find((l) => l.toLowerCase().startsWith("when to use:")) || "").split(":").slice(1).join(":").trim();
+      const el = document.createElement("div"); el.className = "memory-item";
+      const head = document.createElement("div"); head.style.display = "flex"; head.style.alignItems = "center"; head.style.gap = "6px";
+      const c = document.createElement("span"); c.className = "cat"; c.style.flex = "1"; c.style.marginBottom = "0"; c.style.color = "var(--accent)"; c.textContent = name;
+      const del = document.createElement("button"); del.className = "del"; del.type = "button"; del.title = "Delete this skill"; del.setAttribute("aria-label", "Delete skill");
+      del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>';
+      del.addEventListener("click", async () => { if (!confirm(`Delete skill “${name}”?`)) return;
+        try { await api(`/api/memory?uri=${encodeURIComponent(it.uri)}`, { method: "DELETE" }); } catch (err) { alert(err.message); } refreshSkills(); });
+      head.append(c, del);
+      const el2 = document.createElement("p");
+      el2.textContent = (when ? "When: " + when + "\n\n" : "") + it.text.replace(/^# Skill:.*\n/, "").replace(/^When to use:.*\n/im, "").replace(/^Created:.*\n/im, "").trim();
+      el.append(head, el2); panel.append(el);
+    }
+  }
+
+  let makingSkill = false;
+  async function createSkillFromChat() {
+    if (makingSkill) return;
+    if (mode === "preview") { alert("Skills need the real server. This page is in preview mode."); return; }
+    if (!current || !current.messages.length) { alert("Say a few things in this chat first, then create a skill."); return; }
+    makingSkill = true; const btn = $("makeSkill"); btn.disabled = true;
+    skillNote("Building a skill from this conversation…", "info");
+    try {
+      const r = await api(`/api/chats/${current.id}/skill`, { method: "POST" });
+      if (r.created) skillNote(`Skill created: “${r.name}”. ${r.when_to_use || ""} You'll find it in the Skills tab; I'll apply it automatically when it fits.`, "ok");
+      else skillNote(r.reason || "Nothing here was worth saving as a skill yet.", "info");
+    } catch (err) { skillNote("Couldn't create a skill: " + err.message, "error"); }
+    finally { makingSkill = false; updateSkillButton(); }
+  }
+  function skillNote(text, kind) {
+    const el = document.createElement("div"); el.className = "msg assistant";
+    const b = document.createElement("div"); b.className = "bubble"; b.textContent = text;
+    if (kind === "ok") { b.style.borderColor = "var(--ok)"; } else if (kind === "error") { b.style.borderColor = "var(--bad)"; b.style.color = "var(--bad)"; }
+    const meta = document.createElement("div"); meta.className = "meta"; meta.textContent = "Skill · " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    el.append(b, meta); log.append(el); scrollToEnd();
+  }
+  function updateSkillButton() { const b = $("makeSkill"); if (b) b.disabled = makingSkill || mode === "preview" || !current || !current.messages.length; }
+
   // ---- drawer -------------------------------------------------------------
   function openDrawer() { drawer.hidden = false; scrim.hidden = false; refreshChats(); }
   function closeDrawer() { drawer.hidden = true; scrim.hidden = true; }
   function selectTab(name) {
     for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-selected", String(t.dataset.panel === name));
-    for (const p of ["chats", "docs", "memory"]) $(`panel-${p}`).hidden = p !== name;
-    if (name === "docs") refreshDocs(); if (name === "memory") refreshMemory(); if (name === "chats") refreshChats();
+    for (const p of ["chats", "docs", "memory", "skills"]) $(`panel-${p}`).hidden = p !== name;
+    if (name === "docs") refreshDocs(); if (name === "memory") refreshMemory(); if (name === "chats") refreshChats(); if (name === "skills") refreshSkills();
   }
   $("menu").addEventListener("click", openDrawer);
   $("closeDrawer").addEventListener("click", closeDrawer);
@@ -500,6 +564,7 @@
   chips.addEventListener("click", (e) => { const chip = e.target.closest(".chip"); if (chip) submit(chip.dataset.prompt); });
   $("attach").addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", () => { const f = fileInput.files?.[0]; if (f) uploadFile(f); fileInput.value = ""; });
+  $("makeSkill").addEventListener("click", createSkillFromChat);
 
   // ---- boot ---------------------------------------------------------------
   (async () => {

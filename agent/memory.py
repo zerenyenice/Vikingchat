@@ -120,7 +120,32 @@ class MemoryStore:
         top = rel.split("/")[0]
         if rel == "profile.md":
             return "profile"
-        return {"preferences": "preference", "procedures": "procedure", "entities": "entity", "events": "event", "reflections": "reflection"}.get(top, "other")
+        return {"preferences": "preference", "procedures": "procedure", "entities": "entity", "events": "event", "reflections": "reflection", "skills": "skill"}.get(top, "other")
+
+    # ------------------------------------------------------------- skills
+    def save_skill(self, name: str, when_to_use: str, body: str, *, chat: str | None = None, actor: str = "agent") -> dict[str, Any]:
+        """Store a reusable skill (procedure) the agent can apply later."""
+        name = " ".join(name.split()).strip()
+        if not name:
+            raise ValueError("skill needs a name")
+        rel = f"skills/{slugify(name)}.md"
+        chat_id = (chat or "")[:8] or None
+        header = [f"# Skill: {name}", "", f"When to use: {' '.join(when_to_use.split()).strip() or 'When the user asks for this.'}",
+                  f"Created: {today()}" + (f" · chat {chat_id}" if chat_id else ""), ""]
+        content = "\n".join(header) + body.strip() + "\n"
+        self.write(rel, content, actor=actor, chat=chat, reason=f"create skill: {name}")
+        return {"path": rel, "name": name}
+
+    def list_skills(self) -> list[dict[str, Any]]:
+        out = []
+        for f in self.list_files():
+            if f["kind"] != "skill":
+                continue
+            content = self.read(f["rel"]) or ""
+            name = next((l[len("# Skill:"):].strip() for l in content.splitlines() if l.startswith("# Skill:")), f["rel"].split("/")[-1].replace(".md", ""))
+            when = next((l.split(":", 1)[1].strip() for l in content.splitlines() if l.lower().startswith("when to use:")), "")
+            out.append({"name": name, "when": when, "rel": f["rel"], "uri": f["uri"], "modified": f.get("modified")})
+        return out
 
     def path_for(self, kind: str, topic: str | None, text: str) -> str:
         if kind == "profile":
@@ -324,6 +349,11 @@ class MemoryStore:
                 ev_lines.extend(self.active_lines(content)[:2])
         if ev_lines and used < budget:
             add("Recent events", "\n".join(ev_lines))
+        # skills index: name + when-to-use, always loaded so the agent can apply them
+        skills = self.list_skills()
+        if skills and used < budget:
+            add("Available skills — when the user's request matches a skill's 'when to use', read_file /memories/<path> and follow its steps",
+                "\n".join(f"- {s['name']} — {s['when']}  [{s['rel']}]" for s in skills))
         if not parts:
             return "No memories about the user yet."
         return "\n".join(parts)
@@ -467,7 +497,7 @@ def _safe_rel(rel: str) -> bool:
     if not rel or ".." in rel or rel.startswith("/") or not rel.endswith(".md"):
         return False
     top = rel.split("/")[0]
-    return rel in ("profile.md", "_index.md") or top in ("preferences", "procedures", "entities", "events", "reflections")
+    return rel in ("profile.md", "_index.md") or top in ("preferences", "procedures", "entities", "events", "reflections", "skills")
 
 
 def _parse_json(raw: str) -> dict[str, Any]:

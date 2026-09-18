@@ -405,7 +405,7 @@ async function listDocuments() {
 }
 
 const MEMORY_KIND_OF = (rel) => rel === "profile.md" ? "profile" : rel === "_index.md" ? "index"
-  : ({ preferences: "preference", procedures: "procedure", entities: "entity", events: "event", reflections: "reflection" })[rel.split("/")[0]] || "other";
+  : ({ preferences: "preference", procedures: "procedure", entities: "entity", events: "event", reflections: "reflection", skills: "skill" })[rel.split("/")[0]] || "other";
 
 async function memoryOverview() {
   let entries = [];
@@ -425,7 +425,7 @@ async function memoryOverview() {
   if (AGENT_ENABLED) {
     try { const r = await fetch(`${AGENT_URL}/memory/status`, { signal: AbortSignal.timeout(5_000) }); if (r.ok) status = await r.json(); } catch {}
   }
-  const order = ["profile", "preference", "procedure", "entity", "event", "reflection", "index", "other"];
+  const order = ["profile", "preference", "procedure", "entity", "event", "reflection", "skill", "index", "other"];
   items.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || (b.rel > a.rel ? 1 : -1));
   return { user: OV_USER, count: items.length, items, status };
 }
@@ -512,6 +512,22 @@ async function route(req, res) {
     }
   }
   if ((match = p.match(/^\/api\/chats\/([^/]+)\/messages$/)) && m === "POST") return handleTurn(req, res, match[1]);
+  if ((match = p.match(/^\/api\/chats\/([^/]+)\/skill$/)) && m === "POST") {
+    if (!AGENT_ENABLED) throw new HttpError(503, "The agent service is not enabled.");
+    const chat = await loadChat(match[1]);
+    if (!chat.messages.length) throw new HttpError(400, "This chat is empty; say a few things first, then create a skill.");
+    let r;
+    try {
+      r = await fetch(`${AGENT_URL}/skill`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chat.id, messages: chat.messages.map(({ role, content }) => ({ role, content })) }),
+        signal: AbortSignal.timeout(180_000),
+      });
+    } catch (err) { throw new HttpError(503, err.name === "TimeoutError" ? "Skill creation timed out." : `Agent unreachable: ${err.message}`); }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new HttpError(r.status === 400 ? 400 : 502, data.error || `Agent error (${r.status})`);
+    return sendJson(res, 200, data);
+  }
   if (p === "/api/memory" && m === "GET") return sendJson(res, 200, await memoryOverview());
   if (p === "/api/memory" && m === "DELETE") {
     const uri = url.searchParams.get("uri") || "";

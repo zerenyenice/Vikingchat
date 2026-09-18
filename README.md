@@ -79,6 +79,12 @@ implemented in `agent/memory.py` and stored as Markdown in OpenViking under
   write; the Memory tab lets the user read and delete anything; memory is treated
   as data, never as instructions; secrets are never stored.
 
+**Skills** are a special procedural memory: named, reusable procedures under
+`skills/<slug>.md` with a "when to use" trigger. The agent can build one from a
+conversation via the `create_skill` tool (ask "make a skill from this") or the
+"Create skill" button, and it surfaces the skill index every turn so a later
+chat applies a matching skill automatically. Manage them in the Skills tab.
+
 The Memory tab in the app groups records by kind, shows provenance, and has a
 Consolidate button. See the research write-up for sources and rationale.
 
