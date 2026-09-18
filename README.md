@@ -53,7 +53,7 @@ Models used:
 | `OPENVIKING_DISABLED` | `1` runs without memory/documents | unset |
 | `AGENT_URL` | Deep Agent service | `http://127.0.0.1:8100` |
 | `AGENT_DISABLED` | `1` skips the agent and uses plain model calls | unset |
-| `DATA_DIR` | chat storage | `./data` (`/app/.openviking/vikingchat` in Docker) |
+| `DATA_DIR` | chat storage (ephemeral unless a disk is mounted) | `./data` (`/app/.openviking/vikingchat` in Docker) |
 | `HOST` / `PORT` | listen address | `0.0.0.0` / `3000` |
 
 There is no login yet: everyone who opens the app shares one memory space, so
@@ -61,11 +61,14 @@ keep the URL private.
 
 ## Deploy on Render (from a phone)
 
-The blueprint deploys one Docker service with a 1 GB persistent disk mounted at
-`/app/.openviking`. The disk keeps chats, memories and documents across
-restarts. Three processes run in the container (OpenViking, the Python agent,
-Node), which needs the **Standard** instance (2 GB RAM); 512 MB plans run out
-of memory.
+The blueprint deploys one Docker service without a persistent disk: chats,
+memories and documents live inside the container and reset on every deploy or
+restart, which is fine for testing. To keep them across restarts later, add a
+disk mounted at `/app/.openviking`.
+
+Three processes run in the container (OpenViking, the Python agent, Node), so
+the blueprint picks the **Standard** instance (2 GB RAM). You can try
+**Starter** or **Free** (512 MB), but expect out-of-memory restarts.
 
 1. Render dashboard → New → **Blueprint** → pick this repo and branch.
 2. Fill in `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY` when prompted.

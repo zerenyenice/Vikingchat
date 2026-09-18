@@ -1,6 +1,8 @@
 # Render Blueprint: https://render.com/docs/blueprint-spec
-# One Docker service running Vikingchat + embedded OpenViking, with a
-# persistent disk for memories, documents and chat history.
+# One Docker service running Vikingchat + embedded OpenViking + the agent.
+# No persistent disk: chats, memories and documents live in the container's
+# filesystem and reset on every deploy or restart (fine for testing). To keep
+# them, add a disk mounted at /app/.openviking on a paid plan.
 services:
   - type: web
     name: vikingchat
@@ -9,10 +11,6 @@ services:
     branch: claude/mobile-ui-testing-setup-tv9utr
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
-    disk:
-      name: vikingchat-data
-      mountPath: /app/.openviking
-      sizeGB: 1
     envVars:
       - key: AZURE_OPENAI_ENDPOINT
         sync: false
