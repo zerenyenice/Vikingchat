@@ -211,6 +211,7 @@
         drawer = $("drawer"), scrim = $("scrim"), uploadsEl = $("uploads"), fileInput = $("file");
 
   let mode = "checking";           // live | preview | error
+  let healthTimer = null;
   let ovReady = false;
   let busy = false;
   let chats = [];                  // [{id,title,updatedAt,messageCount}]
@@ -234,10 +235,14 @@
       ovReady = Boolean(h.openviking?.ready);
       if (h.configured) {
         const agentOn = Boolean(h.agent?.ready);
-        setStatus("live", `${h.deployment}${agentOn ? " · agent" : ""}${ovReady ? " · memory on" : " · memory off"}`);
+        const starting = h.openviking?.enabled && !ovReady;
+        setStatus("live", `${h.deployment}${agentOn ? " · agent" : ""}${ovReady ? " · memory on" : starting ? " · memory starting…" : " · memory off"}`);
+        $("attach").disabled = !ovReady;
+        $("attach").title = ovReady ? "Upload a document" : "Documents are available once OpenViking is ready";
         showBanner(ovReady ? "" : h.openviking?.enabled
-          ? `Memory and documents are unavailable right now: OpenViking is ${h.openviking?.detail || "not ready"}. Chat still works. Details: /api/diagnostics`
+          ? "OpenViking is still starting (this takes a minute or two after each deploy or restart). Chat works now; memory and document upload switch on automatically when it is ready."
           : "Memory and documents are off: OpenViking is not configured on the server.");
+        if (starting && !healthTimer) healthTimer = setInterval(async () => { if ((await checkHealth()) && ovReady) { clearInterval(healthTimer); healthTimer = null; } }, 5000);
       } else {
         setStatus("error", "Not configured");
         showBanner("The server is running but has no Azure OpenAI endpoint or api key set. Add them to the environment and restart.", "error");
@@ -413,6 +418,7 @@
 
   async function uploadFile(file) {
     if (mode === "preview") { alert("Uploads need the real server. This page is in preview mode."); return; }
+    if (!ovReady) { alert("OpenViking is still starting. Try again in a minute."); return; }
     const item = document.createElement("div"); item.className = "upload"; item.dataset.state = "uploading";
     item.innerHTML = `<span class="name"></span><span class="state">Uploading…</span>`;
     item.querySelector(".name").textContent = file.name; uploadsEl.append(item);
