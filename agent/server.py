@@ -348,15 +348,50 @@ class VikingRecallMiddleware(AgentMiddleware):
                 names.append(name)
         return names
 
+    # OpenViking seeds these agent-persona files; they are not facts about the user.
+    _SKIP_MEMORY_FILES = {"identity.md", "soul.md"}
+
+    def _memory_files(self) -> list[str]:
+        try:
+            with self.lock:
+                raw = self.client.ls(MEMORIES_URI + "/", recursive=True, node_limit=300)
+        except Exception:  # noqa: BLE001
+            return []
+        if isinstance(raw, dict):
+            raw = raw.get("entries") or raw.get("result") or []
+        uris = []
+        for e in raw or []:
+            if not isinstance(e, dict) or e.get("isDir", e.get("is_dir")) or not e.get("uri"):
+                continue
+            rel = e["uri"].replace(MEMORIES_URI + "/", "")
+            if rel.split("/")[-1] in self._SKIP_MEMORY_FILES or rel.split("/")[-1].startswith("."):
+                continue
+            uris.append(e["uri"])
+        return uris
+
     def _build_block(self, query: str) -> str:
         docs = self._inventory()
         parts = ["<auto_recall>"]
         parts.append("Uploaded documents: " + (", ".join(docs) if docs else "(none yet)"))
         budget = self.max_chars
+        # Always-on user memory: profile, preferences and entities are small, so
+        # include them fully on every turn (events and the rest come via search).
+        always = [u for u in self._memory_files()
+                  if u.replace(MEMORIES_URI + "/", "").split("/")[0] in ("profile.md", "preferences", "entities")]
+        if always:
+            parts.append("What is known about the user (memory files, always loaded):")
+            for uri in always[:20]:
+                if budget <= 1500:
+                    break
+                text = self._read(uri, 700)
+                if text:
+                    rel = uri.replace(MEMORIES_URI + "/", "")
+                    parts.append(f"- ({rel}) {text.replace(chr(10), ' ')}"); budget -= len(text)
         if query:
-            mem_hits = self._find(query, MEMORIES_URI, 5)
+            mem_hits = [h for h in self._find(query, MEMORIES_URI, 5)
+                        if h["uri"] not in always and h["uri"].rsplit("/", 1)[-1] not in self._SKIP_MEMORY_FILES]
             if mem_hits:
-                parts.append("Relevant memories:")
+                parts.append("Other relevant memories:")
                 for h in mem_hits:
                     text = self._read(h["uri"], 700) or str(h.get("abstract", "")).strip()
                     if text:

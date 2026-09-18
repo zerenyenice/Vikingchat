@@ -410,7 +410,8 @@ async function memoryOverview() {
     const r = await ov(`/api/v1/fs/ls?uri=${encodeURIComponent(MEMORIES_URI + "/")}&recursive=true&limit=200`);
     entries = Array.isArray(r) ? r : r?.entries ?? [];
   } catch (err) { if (err.status !== 404) throw err; }
-  const files = entries.filter((e) => !(e.isDir ?? e.is_dir)).slice(0, 40);
+  // Hide OpenViking's seeded persona files; they are not facts about the user.
+  const files = entries.filter((e) => !(e.isDir ?? e.is_dir) && !/\/(identity|soul)\.md$/.test(e.uri || "")).slice(0, 40);
   const items = [];
   for (const f of files) {
     const text = await readContent(f.uri, 600);
