@@ -236,7 +236,7 @@
         const agentOn = Boolean(h.agent?.ready);
         setStatus("live", `${h.deployment}${agentOn ? " · agent" : ""}${ovReady ? " · memory on" : " · memory off"}`);
         showBanner(ovReady ? "" : h.openviking?.enabled
-          ? "Memory and documents are unavailable right now: the OpenViking service is starting or unreachable. Chat still works."
+          ? `Memory and documents are unavailable right now: OpenViking is ${h.openviking?.detail || "not ready"}. Chat still works. Details: /api/diagnostics`
           : "Memory and documents are off: OpenViking is not configured on the server.");
       } else {
         setStatus("error", "Not configured");

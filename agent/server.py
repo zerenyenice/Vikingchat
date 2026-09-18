@@ -469,14 +469,16 @@ def main() -> None:
 
 
 def _warmup() -> None:
-    for attempt in range(60):
+    attempt = 0
+    while True:
         try:
             SERVICE.ensure_ready()
             return
         except Exception as err:  # noqa: BLE001
             SERVICE.error = str(err)
-            if attempt == 0:
+            if attempt % 12 == 0:
                 log.warning("not ready yet (%s); retrying", err)
+            attempt += 1
             time.sleep(5)
 
 

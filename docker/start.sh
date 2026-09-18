@@ -6,6 +6,9 @@ OV_HOME="${OPENVIKING_HOME:-/app/.openviking}"
 export OPENVIKING_CONFIG_FILE="${OPENVIKING_CONFIG_FILE:-$OV_HOME/ov.conf}"
 export OPENVIKING_CLI_CONFIG_FILE="${OPENVIKING_CLI_CONFIG_FILE:-$OV_HOME/ovcli.conf}"
 mkdir -p "$OV_HOME" "${DATA_DIR:-$OV_HOME/vikingchat}"
+LOG_DIR="${LOG_DIR:-$OV_HOME/logs}"
+mkdir -p "$LOG_DIR"
+export LOG_DIR
 
 AZ_ENDPOINT="${AZURE_OPENAI_ENDPOINT:-${endpoint:-}}"
 AZ_ENDPOINT="${AZ_ENDPOINT%/}"
@@ -20,7 +23,7 @@ EMBED_API_VERSION="${AZURE_OPENAI_EMBEDDING_API_VERSION:-2024-10-21}"
 KEY_FILE="$OV_HOME/vikingchat/openviking.key"
 if [ -z "${OPENVIKING_API_KEY:-}" ]; then
   if [ -s "$KEY_FILE" ]; then OPENVIKING_API_KEY="$(cat "$KEY_FILE")"
-  else OPENVIKING_API_KEY="$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)"; printf '%s' "$OPENVIKING_API_KEY" > "$KEY_FILE"; fi
+  else OPENVIKING_API_KEY="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"; printf '%s' "$OPENVIKING_API_KEY" > "$KEY_FILE"; fi
 fi
 export OPENVIKING_API_KEY
 
@@ -78,8 +81,8 @@ JSON
     fi
     chmod 600 "$OPENVIKING_CONFIG_FILE"
     echo "[start] launching OpenViking (embedding=$EMBED_MODEL, processing=$PROCESSING_MODEL)"
-    OPENVIKING_SERVER_HOST=127.0.0.1 OPENVIKING_SERVER_PORT=1933 OPENVIKING_WITH_BOT="${OPENVIKING_WITH_BOT:-0}" \
-      openviking-entrypoint --without-bot &
+    ( OPENVIKING_SERVER_HOST=127.0.0.1 OPENVIKING_SERVER_PORT=1933 OPENVIKING_WITH_BOT="${OPENVIKING_WITH_BOT:-0}" \
+        openviking-entrypoint --without-bot 2>&1 | tee -a "$LOG_DIR/openviking.log" | sed -u 's/^/[openviking] /' ) &
     OV_PID=$!
     trap 'kill -TERM $OV_PID 2>/dev/null || true' TERM INT EXIT
   fi
@@ -87,11 +90,13 @@ fi
 
 if [ "${AGENT_DISABLED:-0}" != "1" ]; then
   echo "[start] launching agent service on 127.0.0.1:${AGENT_PORT:-8100}"
-  AGENT_HOST=127.0.0.1 AGENT_PORT="${AGENT_PORT:-8100}" /app/agent-venv/bin/python /app/vikingchat/agent/server.py &
+  ( AGENT_HOST=127.0.0.1 AGENT_PORT="${AGENT_PORT:-8100}" PYTHONUNBUFFERED=1 \
+      /app/agent-venv/bin/python /app/vikingchat/agent/server.py 2>&1 | tee -a "$LOG_DIR/agent.log" ) &
   AGENT_PID=$!
   trap 'kill -TERM $AGENT_PID ${OV_PID:-} 2>/dev/null || true' TERM INT EXIT
 fi
 
 echo "[start] launching Vikingchat on :${PORT:-3000}"
 cd /app/vikingchat
+export STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 exec node server.js

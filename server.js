@@ -190,8 +190,10 @@ async function ovReady() {
   let value = false, detail = "";
   try {
     const r = await fetch(`${OV_URL}/ready`, { signal: AbortSignal.timeout(3_000) });
-    value = r.ok; detail = value ? "ready" : `HTTP ${r.status}`;
-  } catch (err) { detail = err.name === "TimeoutError" ? "timed out" : "unreachable"; }
+    value = r.ok;
+    if (!value) { const body = clip((await r.text().catch(() => "")).replace(/\s+/g, " "), 300); detail = `not ready (HTTP ${r.status}${body ? ": " + body : ""})`; }
+    else detail = "ready";
+  } catch (err) { detail = err.name === "TimeoutError" ? "timed out" : "unreachable (process not listening)"; }
   ovReadyCache = { at: Date.now(), value, detail };
   return { ready: value, detail };
 }
@@ -414,6 +416,51 @@ async function memoryOverview() {
   return { user: OV_USER, count: files.length, items };
 }
 
+// Diagnostics for remote debugging: readiness of each process, memory, and
+// the tail of the OpenViking / agent logs written by docker/start.sh.
+async function tailFile(file, lines = 80) {
+  try {
+    const text = await readFile(file, "utf8");
+    const arr = text.split("\n");
+    return arr.slice(-lines).join("\n");
+  } catch { return null; }
+}
+async function probe(url, timeout = 3_000) {
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(timeout) });
+    return { status: r.status, body: clip((await r.text().catch(() => "")).replace(/\s+/g, " "), 600) };
+  } catch (err) { return { error: err.name === "TimeoutError" ? "timed out" : err.message }; }
+}
+async function diagnostics() {
+  const logDir = env.LOG_DIR || path.join(path.dirname(DATA_DIR), "logs");
+  let meminfo = null;
+  try {
+    const mi = await readFile("/proc/meminfo", "utf8");
+    const pick = (k) => Number((mi.match(new RegExp(`^${k}:\\s+(\\d+)`, "m")) || [])[1] || 0);
+    meminfo = { totalMB: Math.round(pick("MemTotal") / 1024), availableMB: Math.round(pick("MemAvailable") / 1024) };
+  } catch {}
+  let cgroup = null;
+  try {
+    const [limit, usage] = await Promise.all([readFile("/sys/fs/cgroup/memory.max", "utf8"), readFile("/sys/fs/cgroup/memory.current", "utf8")]);
+    cgroup = { limitMB: limit.trim() === "max" ? null : Math.round(Number(limit) / 1048576), usageMB: Math.round(Number(usage) / 1048576) };
+  } catch {}
+  const [ovHealth, ovReadyProbe, agent, ovLog, agentLog] = await Promise.all([
+    OV_ENABLED ? probe(`${OV_URL}/health`) : null,
+    OV_ENABLED ? probe(`${OV_URL}/ready`) : null,
+    AGENT_ENABLED ? probe(`${AGENT_URL}/health`) : null,
+    tailFile(path.join(logDir, "openviking.log")),
+    tailFile(path.join(logDir, "agent.log")),
+  ]);
+  return {
+    time: new Date().toISOString(), startedAt: env.STARTED_AT ?? null, nodeUptimeSec: Math.round(process.uptime()),
+    config: { deployment: DEPLOYMENT, apiVersion: API_VERSION || "v1", endpointSet: Boolean(ENDPOINT), keySet: Boolean(API_KEY),
+      openvikingUrl: OV_URL, openvikingKeySet: Boolean(OV_KEY), agentUrl: AGENT_URL, dataDir: DATA_DIR, logDir },
+    memory: { system: meminfo, container: cgroup, nodeRssMB: Math.round(process.memoryUsage().rss / 1048576) },
+    openviking: { health: ovHealth, ready: ovReadyProbe }, agent,
+    logs: { openviking: ovLog ?? "(no log file)", agent: agentLog ?? "(no log file)" },
+  };
+}
+
 async function serveStatic(req, res, urlPath) {
   const rel = urlPath === "/" ? "/index.html" : decodeURIComponent(urlPath);
   const file = path.normalize(path.join(PUBLIC_DIR, rel));
@@ -438,6 +485,7 @@ async function route(req, res) {
       agent,
     });
   }
+  if (p === "/api/diagnostics" && m === "GET") return sendJson(res, 200, await diagnostics());
   if (p === "/api/chats" && m === "GET") return sendJson(res, 200, { chats: await listChats() });
   if (p === "/api/chats" && m === "POST") return sendJson(res, 201, { chat: await createChat() });
   if ((match = p.match(/^\/api\/chats\/([^/]+)$/))) {
