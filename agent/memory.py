@@ -302,14 +302,19 @@ class MemoryStore:
             idx = self.read("_index.md")
             if idx:
                 add("Memory index (what exists; read_file /memories/<path> for details)", idx[:1200])
-        for rel in ["profile.md"] + sorted(r for r in by_rel if r.split("/")[0] in ALWAYS_LOADED_DIRS):
-            if used >= budget:
-                break
+        if "profile.md" in by_rel:
+            content = self.read("profile.md")
+            if content and self.active_lines(content):
+                add("profile.md", "\n".join(self.active_lines(content)))
+        pref_files = sorted(r for r in by_rel if r.split("/")[0] in ALWAYS_LOADED_DIRS)
+        pref_lines: list[str] = []
+        for rel in pref_files:
             content = self.read(rel)
             if content:
-                lines = self.active_lines(content)
-                if lines:
-                    add(rel, "\n".join(lines))
+                for ln in self.active_lines(content):
+                    pref_lines.append(f"{ln}  [{rel}]")
+        if pref_lines and used < budget:
+            add("Standing preferences and procedures — follow these every turn, even for short or foreign-language messages", "\n".join(pref_lines))
         # recent episodic memory (last 5 events by date in filename)
         events = sorted((r for r in by_rel if r.startswith("events/")), reverse=True)[:5]
         ev_lines = []
