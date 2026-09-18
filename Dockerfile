@@ -31,7 +31,9 @@ ENV HOST=0.0.0.0 \
     DATA_DIR=/app/.openviking/vikingchat \
     OPENVIKING_URL=http://127.0.0.1:1933 \
     OPENVIKING_WITH_BOT=0 \
-    AGENT_URL=http://127.0.0.1:8100
+    AGENT_URL=http://127.0.0.1:8100 \
+    MALLOC_ARENA_MAX=2 \
+    NODE_OPTIONS=--max-old-space-size=160
 
 EXPOSE 3000
 ENTRYPOINT ["/usr/local/bin/vikingchat-start"]
