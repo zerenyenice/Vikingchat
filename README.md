@@ -49,7 +49,7 @@ Models used:
 | `AZURE_OPENAI_API_VERSION` | optional; use the legacy versioned chat path | unset (v1 API) |
 | `OPENVIKING_URL` | OpenViking server | `http://127.0.0.1:1933` |
 | `OPENVIKING_API_KEY` | OpenViking key | generated in Docker |
-| `OPENVIKING_USER` | user namespace for memories | `default` |
+| `OPENVIKING_ACCOUNT` / `OPENVIKING_USER` | identity asserted to OpenViking (trusted mode) | `default` |
 | `OPENVIKING_DISABLED` | `1` runs without memory/documents | unset |
 | `AGENT_URL` | Deep Agent service | `http://127.0.0.1:8100` |
 | `AGENT_DISABLED` | `1` skips the agent and uses plain model calls | unset |

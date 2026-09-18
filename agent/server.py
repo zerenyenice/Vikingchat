@@ -60,6 +60,7 @@ DEPLOYMENT = env.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.1")
 OV_URL = (env.get("OPENVIKING_URL") or "http://127.0.0.1:1933").rstrip("/")
 OV_KEY = env.get("OPENVIKING_API_KEY", "")
 OV_USER = env.get("OPENVIKING_USER", "default")
+OV_ACCOUNT = env.get("OPENVIKING_ACCOUNT", "default")
 MEMORIES_URI = f"viking://user/{OV_USER}/memories"
 UPLOADS_URI = "viking://resources/uploads"
 HOST = env.get("AGENT_HOST", "127.0.0.1")
@@ -292,7 +293,8 @@ TURN_LOCK = threading.Lock()     # one chat turn at a time (single-user app)
 
 
 def build_client() -> SyncHTTPClient:
-    client = SyncHTTPClient(url=OV_URL, api_key=OV_KEY or None, timeout=60.0)
+    # Trusted mode: root key for auth, account/user headers for identity.
+    client = SyncHTTPClient(url=OV_URL, api_key=OV_KEY or None, account=OV_ACCOUNT, user_id=OV_USER, timeout=60.0)
     client.initialize()
     return client
 

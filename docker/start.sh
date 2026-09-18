@@ -73,7 +73,7 @@ if [ "$EMBEDDED" = "1" ]; then
     "host": "127.0.0.1",
     "port": 1933,
     "root_api_key": "$OPENVIKING_API_KEY",
-    "auth_mode": "api_key",
+    "auth_mode": "trusted",
     "cors_origins": []
   }
 }

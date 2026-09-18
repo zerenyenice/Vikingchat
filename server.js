@@ -12,7 +12,7 @@
 //   AZURE_OPENAI_API_VERSION                optional; legacy versioned path
 //   OPENVIKING_URL                          default http://127.0.0.1:1933
 //   OPENVIKING_API_KEY                      OpenViking API key (root key)
-//   OPENVIKING_USER                         user namespace (default "default")
+//   OPENVIKING_ACCOUNT / OPENVIKING_USER    identity asserted to OpenViking (default "default")
 //   AGENT_URL                               deep agent service (default http://127.0.0.1:8100)
 //   DATA_DIR                                where chats are stored (default ./data)
 //   HOST / PORT                             listen address (default 0.0.0.0:3000)
@@ -41,6 +41,7 @@ const CHATS_DIR = path.join(DATA_DIR, "chats");
 const OV_URL = (env.OPENVIKING_URL ?? "http://127.0.0.1:1933").replace(/\/+$/, "");
 const OV_KEY = env.OPENVIKING_API_KEY || "";
 const OV_USER = env.OPENVIKING_USER || "default";
+const OV_ACCOUNT = env.OPENVIKING_ACCOUNT || "default";
 const OV_ENABLED = Boolean(OV_URL) && env.OPENVIKING_DISABLED !== "1";
 const UPLOADS_URI = "viking://resources/uploads";
 const MEMORIES_URI = `viking://user/${OV_USER}/memories`;
@@ -165,7 +166,8 @@ async function deleteChat(id) {
 
 async function ov(pathname, { method = "GET", body, timeout = 30_000 } = {}) {
   if (!OV_ENABLED) throw new HttpError(503, "OpenViking is not configured");
-  const headers = {};
+  // Trusted mode: the root key authenticates us, these headers say who we act as.
+  const headers = { "X-OpenViking-Account": OV_ACCOUNT, "X-OpenViking-User": OV_USER };
   if (OV_KEY) headers.Authorization = `Bearer ${OV_KEY}`;
   if (body !== undefined && !(body instanceof FormData)) { headers["Content-Type"] = "application/json"; body = JSON.stringify(body); }
   let r;
