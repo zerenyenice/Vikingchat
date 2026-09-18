@@ -123,38 +123,57 @@ class MemoryStore:
         return {"preferences": "preference", "procedures": "procedure", "entities": "entity", "events": "event", "reflections": "reflection", "skills": "skill"}.get(top, "other")
 
     # ------------------------------------------------------------- skills
-    def save_skill(self, name: str, when_to_use: str, body: str, *, chat: str | None = None, actor: str = "agent") -> dict[str, Any]:
-        """Store a reusable skill (procedure) the agent can apply later."""
-        name = " ".join(name.split()).strip()
-        if not name:
-            raise ValueError("skill needs a name")
-        rel = f"skills/{slugify(name)}.md"
+    # Skills use the Agent Skills layout deepagents' SkillsMiddleware reads:
+    #   skills/<name>/SKILL.md  with YAML frontmatter (name, description, allowed-tools)
+    @staticmethod
+    def skill_slug(name: str) -> str:
+        slug = slugify(name, max_len=64)
+        return slug or "skill"
+
+    def save_skill(self, name: str, description: str, instructions: str, *, tools: list[str] | None = None,
+                   chat: str | None = None, actor: str = "agent") -> dict[str, Any]:
+        """Store a reusable skill as skills/<name>/SKILL.md (Agent Skills format)."""
+        slug = self.skill_slug(name)
+        description = " ".join(description.split()).strip()[:1024] or "Reusable procedure learned from a conversation."
+        tools = [t.strip() for t in (tools or []) if t and t.strip()]
         chat_id = (chat or "")[:8] or None
-        header = [f"# Skill: {name}", "", f"When to use: {' '.join(when_to_use.split()).strip() or 'When the user asks for this.'}",
-                  f"Created: {today()}" + (f" · chat {chat_id}" if chat_id else ""), ""]
-        content = "\n".join(header) + body.strip() + "\n"
-        self.write(rel, content, actor=actor, chat=chat, reason=f"create skill: {name}")
-        return {"path": rel, "name": name}
+        fm = [f"name: {slug}", f"description: {description}"]
+        if tools:
+            fm.append("allowed-tools: [" + ", ".join(tools) + "]")
+        fm.append("metadata:")
+        fm.append(f"  created: {today()}")
+        if chat_id:
+            fm.append(f"  source-chat: {chat_id}")
+        title = " ".join(name.split()).strip() or slug
+        body = instructions.strip()
+        if tools and "## Tools" not in body:
+            body += "\n\n## Tools used\n" + "\n".join(f"- `{t}`" for t in tools)
+        content = "---\n" + "\n".join(fm) + "\n---\n\n# " + title + "\n\n" + body + "\n"
+        rel = f"skills/{slug}/SKILL.md"
+        self.write(rel, content, actor=actor, chat=chat, reason=f"create skill: {slug}")
+        return {"path": rel, "name": slug, "title": title}
+
+    @staticmethod
+    def parse_skill(content: str) -> dict[str, str]:
+        m = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.S)
+        meta: dict[str, str] = {}
+        if m:
+            for line in m.group(1).splitlines():
+                if ":" in line and not line.startswith(" "):
+                    k, v = line.split(":", 1)
+                    meta[k.strip()] = v.strip()
+        return meta
 
     def list_skills(self) -> list[dict[str, Any]]:
         out = []
         for f in self.list_files():
-            if f["kind"] != "skill":
+            if f["kind"] != "skill" or not f["rel"].endswith("/SKILL.md"):
                 continue
             content = self.read(f["rel"]) or ""
-            name = next((l[len("# Skill:"):].strip() for l in content.splitlines() if l.startswith("# Skill:")), f["rel"].split("/")[-1].replace(".md", ""))
-            when = next((l.split(":", 1)[1].strip() for l in content.splitlines() if l.lower().startswith("when to use:")), "")
-            out.append({"name": name, "when": when, "rel": f["rel"], "uri": f["uri"], "modified": f.get("modified")})
+            meta = self.parse_skill(content)
+            out.append({"name": meta.get("name") or f["rel"].split("/")[1], "description": meta.get("description", ""),
+                        "tools": meta.get("allowed-tools", ""), "rel": f["rel"], "uri": f["uri"], "modified": f.get("modified")})
         return out
-
-    def path_for(self, kind: str, topic: str | None, text: str) -> str:
-        if kind == "profile":
-            return "profile.md"
-        if kind == "event":
-            return f"events/{today()}-{slugify(topic or text)}.md"
-        if not topic:
-            raise ValueError(f"{kind} memories need a topic (e.g. 'language', 'project-vikingchat', 'ali-yilmaz').")
-        return f"{KIND_DIR[kind]}/{slugify(topic)}.md"
 
     # ------------------------------------------------------------ raw file io
     def list_files(self) -> list[dict[str, Any]]:
@@ -349,11 +368,6 @@ class MemoryStore:
                 ev_lines.extend(self.active_lines(content)[:2])
         if ev_lines and used < budget:
             add("Recent events", "\n".join(ev_lines))
-        # skills index: name + when-to-use, always loaded so the agent can apply them
-        skills = self.list_skills()
-        if skills and used < budget:
-            add("Available skills — when the user's request matches a skill's 'when to use', read_file /memories/<path> and follow its steps",
-                "\n".join(f"- {s['name']} — {s['when']}  [{s['rel']}]" for s in skills))
         if not parts:
             return "No memories about the user yet."
         return "\n".join(parts)
@@ -442,7 +456,7 @@ class MemoryStore:
     # ------------------------------------------------------------- consolidation
     CONSOLIDATION_PROMPT = """You are the memory curator for a personal assistant. You receive ALL memory files about one user.
 Rewrite them into a clean, deduplicated, consistent set. Rules:
-- Keep the file layout: profile.md, preferences/<topic>.md, procedures/<topic>.md, entities/<name>.md, events/<date>-<slug>.md, reflections/<date>.md.
+- Keep the file layout: profile.md, preferences/<topic>.md, procedures/<topic>.md, entities/<name>.md, events/<date>-<slug>.md, reflections/<date>.md. Never create or modify anything under skills/.
 - Keep every record line in the exact format `- [YYYY-MM-DD · chat abcd1234 · stated] text` (chat part optional; source is stated|inferred|imported; keep dates and chat ids from the originals).
 - Merge duplicates into one line (keep the earliest date). When two active lines contradict, keep the newer one active and tag the older one with ` · superseded YYYY-MM-DD` inside its brackets. Never invent facts.
 - Move events older than {retention_days} days into a short reflection file `reflections/{today}.md` (2-6 bullets of durable takeaways) and delete those event files.
@@ -460,6 +474,8 @@ Include in "files" only files whose content changes, plus `_index.md`."""
         dump: list[str] = []
         total = 0
         for f in sorted(files, key=lambda x: x["rel"]):
+            if f["kind"] == "skill":
+                continue  # skills are managed by the agent's create_skill tool, not the curator
             content = self.read(f["rel"]) or ""
             chunk = f"=== {f['rel']} ===\n{content.strip()}\n"
             if total + len(chunk) > max_chars:
@@ -497,7 +513,7 @@ def _safe_rel(rel: str) -> bool:
     if not rel or ".." in rel or rel.startswith("/") or not rel.endswith(".md"):
         return False
     top = rel.split("/")[0]
-    return rel in ("profile.md", "_index.md") or top in ("preferences", "procedures", "entities", "events", "reflections", "skills")
+    return rel in ("profile.md", "_index.md") or top in ("preferences", "procedures", "entities", "events", "reflections")
 
 
 def _parse_json(raw: str) -> dict[str, Any]:

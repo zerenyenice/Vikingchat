@@ -489,7 +489,7 @@
   async function refreshSkills() {
     const panel = $("panel-skills"); panel.replaceChildren();
     const hint = document.createElement("div"); hint.className = "hint";
-    hint.textContent = "Reusable procedures the agent builds from your chats and applies later. Create one from the current chat, or ask in chat: “make a skill from this”.";
+    hint.textContent = "Reusable procedures (SKILL.md files) the agent writes from your chats and applies later via its Skills System. Create one from the current chat, or ask in chat: “make a skill from this”.";
     panel.append(hint);
     const make = document.createElement("button"); make.className = "newchat"; make.type = "button"; make.style.marginLeft = "0"; make.style.marginRight = "0";
     make.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v4M3 5h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5z"/></svg> Create skill from this chat';
@@ -498,46 +498,36 @@
     if (mode === "preview" || !ovReady) { const e = document.createElement("div"); e.className = "empty"; e.textContent = mode === "preview" ? "Connect a server to use skills." : "OpenViking is not reachable right now."; panel.append(e); return; }
     let mem;
     try { mem = await api("/api/memory"); } catch (err) { const e = document.createElement("div"); e.className = "empty"; e.textContent = err.message; panel.append(e); return; }
-    const skills = (mem.items || []).filter((it) => it.kind === "skill");
+    const skills = (mem.items || []).filter((it) => it.kind === "skill" && /\/SKILL\.md$/.test(it.rel));
     if (!skills.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "No skills yet."; panel.append(e); return; }
     for (const it of skills) {
-      const lines = it.text.split("\n");
-      const name = (lines.find((l) => l.startsWith("# Skill:")) || "").replace("# Skill:", "").trim() || it.rel.split("/").pop().replace(".md", "");
-      const when = (lines.find((l) => l.toLowerCase().startsWith("when to use:")) || "").split(":").slice(1).join(":").trim();
+      const fm = (it.text.match(/^---\s*\n([\s\S]*?)\n---/) || [])[1] || "";
+      const meta = {}; for (const l of fm.split("\n")) { const i = l.indexOf(":"); if (i > 0 && !l.startsWith(" ")) meta[l.slice(0, i).trim()] = l.slice(i + 1).trim(); }
+      const name = meta.name || it.rel.split("/")[1] || it.rel;
       const el = document.createElement("div"); el.className = "memory-item";
       const head = document.createElement("div"); head.style.display = "flex"; head.style.alignItems = "center"; head.style.gap = "6px";
       const c = document.createElement("span"); c.className = "cat"; c.style.flex = "1"; c.style.marginBottom = "0"; c.style.color = "var(--accent)"; c.textContent = name;
       const del = document.createElement("button"); del.className = "del"; del.type = "button"; del.title = "Delete this skill"; del.setAttribute("aria-label", "Delete skill");
       del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>';
       del.addEventListener("click", async () => { if (!confirm(`Delete skill “${name}”?`)) return;
-        try { await api(`/api/memory?uri=${encodeURIComponent(it.uri)}`, { method: "DELETE" }); } catch (err) { alert(err.message); } refreshSkills(); });
+        const dir = it.uri.replace(/\/SKILL\.md$/, "");
+        try { await api(`/api/memory?uri=${encodeURIComponent(dir)}`, { method: "DELETE" }); } catch (err) { alert(err.message); } refreshSkills(); });
       head.append(c, del);
-      const el2 = document.createElement("p");
-      el2.textContent = (when ? "When: " + when + "\n\n" : "") + it.text.replace(/^# Skill:.*\n/, "").replace(/^When to use:.*\n/im, "").replace(/^Created:.*\n/im, "").trim();
-      el.append(head, el2); panel.append(el);
+      const p = document.createElement("p");
+      const body = it.text.replace(/^---[\s\S]*?\n---\s*\n/, "").replace(/^# .*\n/, "").trim();
+      p.textContent = (meta.description ? meta.description + "\n" : "") + (meta["allowed-tools"] ? "Tools: " + meta["allowed-tools"].replace(/[\[\]]/g, "") + "\n" : "") + "\n" + body;
+      el.append(head, p); panel.append(el);
     }
   }
 
   let makingSkill = false;
+  const CREATE_SKILL_PROMPT = "Create a reusable skill from this conversation: use the create_skill tool with a lowercase-hyphen name, a description that says what it does and when to use it, the tools it relies on, and general numbered steps (no one-off values). Then tell me the skill name and when you'll use it.";
   async function createSkillFromChat() {
-    if (makingSkill) return;
+    if (makingSkill || busy) return;
     if (mode === "preview") { alert("Skills need the real server. This page is in preview mode."); return; }
     if (!current || !current.messages.length) { alert("Say a few things in this chat first, then create a skill."); return; }
-    makingSkill = true; const btn = $("makeSkill"); btn.disabled = true;
-    skillNote("Building a skill from this conversation…", "info");
-    try {
-      const r = await api(`/api/chats/${current.id}/skill`, { method: "POST" });
-      if (r.created) skillNote(`Skill created: “${r.name}”. ${r.when_to_use || ""} You'll find it in the Skills tab; I'll apply it automatically when it fits.`, "ok");
-      else skillNote(r.reason || "Nothing here was worth saving as a skill yet.", "info");
-    } catch (err) { skillNote("Couldn't create a skill: " + err.message, "error"); }
-    finally { makingSkill = false; updateSkillButton(); }
-  }
-  function skillNote(text, kind) {
-    const el = document.createElement("div"); el.className = "msg assistant";
-    const b = document.createElement("div"); b.className = "bubble"; b.textContent = text;
-    if (kind === "ok") { b.style.borderColor = "var(--ok)"; } else if (kind === "error") { b.style.borderColor = "var(--bad)"; b.style.color = "var(--bad)"; }
-    const meta = document.createElement("div"); meta.className = "meta"; meta.textContent = "Skill · " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    el.append(b, meta); log.append(el); scrollToEnd();
+    makingSkill = true; updateSkillButton();
+    try { await submit(CREATE_SKILL_PROMPT); } finally { makingSkill = false; updateSkillButton(); }
   }
   function updateSkillButton() { const b = $("makeSkill"); if (b) b.disabled = makingSkill || mode === "preview" || !current || !current.messages.length; }
 

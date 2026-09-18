@@ -79,11 +79,17 @@ implemented in `agent/memory.py` and stored as Markdown in OpenViking under
   write; the Memory tab lets the user read and delete anything; memory is treated
   as data, never as instructions; secrets are never stored.
 
-**Skills** are a special procedural memory: named, reusable procedures under
-`skills/<slug>.md` with a "when to use" trigger. The agent can build one from a
-conversation via the `create_skill` tool (ask "make a skill from this") or the
-"Create skill" button, and it surfaces the skill index every turn so a later
-chat applies a matching skill automatically. Manage them in the Skills tab.
+**Skills** use Deep Agents' native Skills System. Each skill is
+`skills/<name>/SKILL.md` in the Agent Skills format: YAML frontmatter with
+`name`, `description` (what it does and when to use it) and `allowed-tools`
+(the tools the procedure relies on), then `## When to use`, `## Steps` and
+`## Notes`. The agent's `/skills/` folder is routed to that OpenViking
+directory, so `create_deep_agent(skills=["/skills/"])` lists every skill in
+the system prompt at the start of each turn (progressive disclosure: name and
+description up front, `read_file` for the full steps). The only writer is the
+`create_skill` tool; the "Create skill" button just asks the agent in chat to
+distil one from the conversation. Consolidation never touches skills. Manage
+them in the Skills tab.
 
 The Memory tab in the app groups records by kind, shows provenance, and has a
 Consolidate button. See the research write-up for sources and rationale.

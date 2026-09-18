@@ -109,7 +109,7 @@ Every turn, a block called <auto_recall> is added to these instructions: the alw
 - The user should never have to tell you to look at their documents or memory. Looking is your job.
 
 ## Skills (reusable procedures you build)
-You can turn what worked in a conversation into a **skill**: a named, reusable procedure you apply in later chats. The <auto_recall> block lists the skills that exist ("Available skills"). When the user's request matches a skill's "when to use", read that file with `read_file /memories/skills/<slug>.md` and follow its steps. Create a skill with the `create_skill` tool when the user asks (or clicks "Create skill"), or when you notice a repeatable multi-step task worth saving. Keep steps concrete and general enough to reuse; do not bake in one-off values.
+Your Skills System (listed further down in these instructions) shows every skill you have, with its description. When the user's request matches a skill's description, `read_file` its SKILL.md (limit=1000) and follow it. Create a skill with `create_skill` when the user asks ("make a skill from this", or the Create skill button), or when you notice a repeatable multi-step task worth saving. A good skill has: a lowercase-hyphen name, a description that states what it does AND when to use it, the tools it relies on, and general numbered steps without one-off values. Skills appear in the Skills System from the next turn.
 
 ## Documents
 The user's uploaded documents are in OpenViking under `{UPLOADS_URI}`. Ground answers in them when they are relevant and name the document you used. Quote the exact values found (addresses, numbers, dates) rather than paraphrasing.
@@ -452,15 +452,18 @@ def make_memory_tools(store: MemoryStore, current_chat: Callable[[], str | None]
         return "\n\n".join(f"/memories/{h.rel} [{h.kind}] ({', '.join(h.why)})\n{h.text}" for h in hits)
 
     @tool
-    def create_skill(name: str, when_to_use: str, steps: str) -> str:
-        """Save a reusable skill (a repeatable procedure) so you can apply it in future chats.
-        name: short skill name. when_to_use: one line describing the situations this skill applies to.
-        steps: the procedure as a numbered Markdown list, plus any notes. Distill it from what worked in this conversation."""
+    def create_skill(name: str, description: str, instructions: str, tools: list[str] | None = None) -> str:
+        """Save a reusable skill (a repeatable procedure) so you can apply it in future chats. It is stored as
+        /skills/<name>/SKILL.md and listed in your Skills System from the next turn on.
+        name: short lowercase-hyphen identifier (e.g. 'draft-leave-request'). description: one or two sentences saying
+        WHAT the skill does and WHEN to use it (this is what future turns see, so make the trigger explicit).
+        instructions: Markdown body with '## When to use', '## Steps' (numbered, general, no one-off values) and '## Notes'.
+        tools: names of the tools the procedure uses (e.g. ['viking_find', 'viking_read', 'remember']); they go into allowed-tools."""
         try:
-            r = store.save_skill(name, when_to_use, steps, chat=current_chat())
+            r = store.save_skill(name, description, instructions, tools=tools, chat=current_chat())
         except ValueError as err:
             return f"Error: {err}"
-        return f"Saved skill '{r['name']}' at /memories/{r['path']}."
+        return f"Saved skill '{r['name']}' at /skills/{r['name']}/SKILL.md. It will appear in your Skills System on the next turn."
 
     return [remember, forget, recall, create_skill]
 
@@ -483,7 +486,11 @@ def build_client() -> SyncHTTPClient:
 
 def build_agent(client: SyncHTTPClient, store: MemoryStore, current_chat: Callable[[], str | None]):
     llm = ChatOpenAI(model=DEPLOYMENT, base_url=f"{ENDPOINT}/openai/v1/", api_key=API_KEY, timeout=90, max_retries=2)
-    backend = CompositeBackend(default=StateBackend(), routes={"/memories/": OpenVikingBackend(client, MEMORIES_URI, CLIENT_LOCK)})
+    backend = CompositeBackend(default=StateBackend(), routes={
+        "/memories/": OpenVikingBackend(client, MEMORIES_URI, CLIENT_LOCK),
+        # deepagents' native Skills System reads /skills/<name>/SKILL.md; same OpenViking files as /memories/skills/.
+        "/skills/": OpenVikingBackend(client, f"{MEMORIES_URI}/skills", CLIENT_LOCK),
+    })
     tools = make_memory_tools(store, current_chat) + create_openviking_tools(
         client=client,
         profile="retrieval",
@@ -497,6 +504,7 @@ def build_agent(client: SyncHTTPClient, store: MemoryStore, current_chat: Callab
         system_prompt=SYSTEM_PROMPT,
         backend=backend,
         memory=["/memories/profile.md"],
+        skills=["/skills/"],
         middleware=[VikingRecallMiddleware(client, store, CLIENT_LOCK)],
         name="vikingchat",
     )
@@ -526,7 +534,7 @@ def _summarise_tool_calls(new_messages: list[Any]) -> tuple[list[dict[str, Any]]
                 args = tc.get("args") or {}
                 brief = {k: (v if isinstance(v, (int, float, bool)) else str(v)[:120]) for k, v in args.items() if k in ("file_path", "path", "query", "target_uri", "uris", "uri", "pattern")}
                 calls.append({"name": tc["name"], "args": brief})
-                if tc["name"] in ("remember", "forget") or (tc["name"] in ("write_file", "edit_file", "delete") and str(args.get("file_path", "")).startswith("/memories/")):
+                if tc["name"] in ("remember", "forget", "create_skill") or (tc["name"] in ("write_file", "edit_file", "delete") and str(args.get("file_path", "")).startswith(("/memories/", "/skills/"))):
                     memory_updated = True
         elif isinstance(m, ToolMessage):
             for token in str(_text(m.content)).replace('"', " ").replace("'", " ").split():
@@ -618,30 +626,6 @@ class AgentService:
         with TURN_LOCK:  # never run while a turn is writing memory
             return store.consolidate(self.consolidation_llm, retention_days=EVENT_RETENTION_DAYS)
 
-    SKILL_PROMPT = """You turn a conversation into ONE reusable skill for a personal assistant: a named, repeatable procedure the assistant can apply in future, unrelated chats.
-From the transcript, identify the useful multi-step task that was accomplished (or the approach the user preferred) and generalise it. Do NOT bake in one-off values (specific names, dates, numbers) — describe them as inputs to gather.
-Return ONLY JSON: {"name": "<3-6 word skill name>", "when_to_use": "<one line describing the trigger situations>", "steps": "<numbered Markdown list of steps, then an optional '## Notes' section>"}.
-If the conversation contains nothing worth saving as a repeatable skill, return {"name": "", "when_to_use": "", "steps": ""}."""
-
-    def distill_skill(self, chat_id: str, history: list[dict[str, str]]) -> dict[str, Any]:
-        self.ensure_ready()
-        transcript = "\n".join(f"{m.get('role')}: {str(m.get('content',''))[:2000]}" for m in history if str(m.get("content", "")).strip())
-        if not transcript.strip():
-            raise BadRequest("This chat has no conversation to build a skill from yet.")
-        raw = self.consolidation_llm(self.SKILL_PROMPT, transcript[:24000])
-        try:
-            from memory import _parse_json
-            plan = _parse_json(raw)
-        except Exception as err:  # noqa: BLE001
-            raise RuntimeError(f"could not parse skill from the conversation: {err}")
-        name = str(plan.get("name") or "").strip()
-        if not name:
-            return {"created": False, "reason": "Nothing in this chat was worth saving as a reusable skill yet."}
-        self._current_chat.id = chat_id
-        with TURN_LOCK:
-            r = self.store.save_skill(name, str(plan.get("when_to_use") or ""), str(plan.get("steps") or ""), chat=chat_id)
-        return {"created": True, "name": r["name"], "path": r["path"], "when_to_use": str(plan.get("when_to_use") or "")}
-
     def memory_status(self) -> dict[str, Any]:
         st = self.store
         return {
@@ -700,19 +684,6 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as err:  # noqa: BLE001
                 log.exception("consolidation failed")
                 return self._send(502, {"error": f"Consolidation failed: {err}"})
-        if route == "/skill":
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-                body = json.loads(self.rfile.read(length) or b"{}")
-                history = body.get("messages") or []
-                if not isinstance(history, list):
-                    raise BadRequest("messages must be a list")
-                return self._send(200, SERVICE.distill_skill(str(body.get("chat_id") or "chat"), history))
-            except (BadRequest, json.JSONDecodeError) as err:
-                return self._send(400, {"error": str(err)})
-            except Exception as err:  # noqa: BLE001
-                log.exception("skill distillation failed")
-                return self._send(502, {"error": f"Skill creation failed: {err}"})
         if route != "/chat":
             return self._send(404, {"error": "not found"})
         try:
